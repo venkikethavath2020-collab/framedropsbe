@@ -24,6 +24,7 @@ import notificationsRoutes from './notifications.routes.js'
 import searchRoutes from './search.routes.js'
 import announcementsRoutes from './announcements.routes.js'
 import systemRoutes from './system.routes.js'
+import jobsRoutes from './jobs.routes.js'
 
 const router = Router()
 
@@ -45,5 +46,6 @@ router.use('/notifications',      notificationsRoutes)
 router.use('/search',             searchRoutes)
 router.use('/announcements',      announcementsRoutes)
 router.use('/system',             systemRoutes)
+router.use('/jobs',               jobsRoutes)
 
 export default router

@@ -2,8 +2,8 @@
  * Admin Capacity Service — turns raw pool/Postgres/process probes into a
  * single dashboard payload with named upgrade thresholds.
  *
- * The thresholds here are the source of truth that `docs/SCALING.md`
- * documents in prose. Keep them in sync.
+ * The thresholds here are the source of truth that the SCALING runbook
+ * (in the framedropnotes repo) documents in prose. Keep them in sync.
  */
 
 import os from 'node:os'
@@ -18,7 +18,7 @@ import * as repo from '../repositories/capacity.repository.js'
 //   warn     — start planning the upgrade
 //   critical — upgrade now or expect failures
 //
-// When you tune these, also update docs/SCALING.md.
+// When you tune these, also update the SCALING runbook in framedropnotes.
 
 const THRESHOLDS = {
   pool_utilization_pct: { warn: 60, critical: 85 },

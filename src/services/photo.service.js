@@ -14,8 +14,8 @@ import { CLIENT_MAX_IMAGES, MAX_PHOTOS_PER_ALBUM } from '../config/pricing.js'
 import { query, transaction as dbTransaction } from '../config/db.js'
 import { detectImageMime, sanitizeFilename } from '../utils/imageValidation.js'
 // Storage backend — Cloudflare R2 only. The previous dual-provider abstraction
-// (Cloudinary fallback) was retired after the R2 cutover; see
-// documentation/cloudinary-archive/ for the historic shape.
+// (Cloudinary fallback) was retired after the R2 cutover; the historic shape
+// lives in git history if you ever need to diff against it.
 import * as r2Provider from '../config/r2.js'
 import { recordR2 } from '../lib/circuitBreaker.js'
 

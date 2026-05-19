@@ -19,7 +19,7 @@ const router = Router()
  *       Returns the current state of the pg pool, Postgres connection
  *       saturation, Node heap, long-running queries, and an active-user
  *       breakdown. Each metric is graded ok | warn | critical against
- *       the thresholds documented in docs/SCALING.md.
+ *       the thresholds documented in the SCALING runbook (framedropnotes repo).
  *
  *       Cheap enough to poll at 30s intervals.
  *     security: [{ BearerAuth: [] }]
