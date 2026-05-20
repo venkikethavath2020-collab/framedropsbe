@@ -123,8 +123,6 @@ export default defineComponent({
           : null,
         h(Section, { style: list }, () => [
           h(Text, { style: listItem }, () => '✨  Browse and favorite the shots you love'),
-          h(Text, { style: listItem }, () => '💾  Download once you\'re happy with the selection'),
-          h(Text, { style: listItem }, () => `💬  Leave a note for ${photographerFirst} if needed`),
         ]),
         props.expiresAt
           ? h(Section, { style: noticeBox }, () =>
