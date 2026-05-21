@@ -286,7 +286,17 @@ app.use('/v1/calendar',       calendarRoutes)
 app.use('/v1/client-auth',    authLimiter, clientAuthRoutes)
 app.use('/v1/payments',         paymentLimiter, paymentRoutes)          // Flow 1: photographer → platform (Razorpay)
 app.use('/v1/payments/wallet',  paymentLimiter, walletPaymentRoutes)    // Flow 1 add-on: wallet pre-payment layer
-app.use('/v1',                  paymentLimiter, albumExtensionRoutes)   // Per-album paid extensions
+// Album-extension routes are defined with `/albums/...` prefixes inside
+// the router, so they must be mounted at `/v1` to preserve their URLs.
+// We can't blanket-apply paymentLimiter at `/v1` — that would gate every
+// other public route (status, stats, testimonials, etc.) on the payment
+// limiter (30/15min/IP). Instead, only fire the limiter when the path is
+// actually an extension endpoint.
+const extensionPaymentGate = (req, res, next) => {
+  if (req.path.includes('/extensions')) return paymentLimiter(req, res, next)
+  return next()
+}
+app.use('/v1', extensionPaymentGate, albumExtensionRoutes)   // Per-album paid extensions
 app.use('/v1/client-payments',  paymentLimiter, clientPaymentRoutes)    // Flow 2: customer → photographer
 app.use('/v1/wallet',           walletRoutes)
 app.use('/v1/withdrawals',      withdrawalRoutes)
