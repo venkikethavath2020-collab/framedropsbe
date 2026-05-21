@@ -176,7 +176,7 @@ const definition = {
           selectedCount:     { type: 'integer', example: 73 },
           chargeableImages:  { type: 'integer', example: 112 },
           freeConsumed:      { type: 'integer', example: 300 },
-          price:             { type: 'integer', example: 59, description: 'Snapshot price in rupees.' },
+          price:             { type: 'integer', example: 229, description: 'Snapshot price in rupees.' },
           isPaid:            { type: 'boolean', example: false, description: 'TRUTH SOURCE for Flow 1 unlock.' },
           isLocked:          { type: 'boolean', example: false },
           isExpired:         { type: 'boolean', example: false },

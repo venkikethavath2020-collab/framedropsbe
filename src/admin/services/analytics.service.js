@@ -399,16 +399,16 @@ export async function getRevenueByAlbum() {
 //
 // Tier buckets aligned to src/config/pricing.js bands:
 //   Free      0
-//   Basic     1–150
-//   Pro       151–1000
-//   Studio    1001–3000
+//   Starter   1–1000
+//   Popular   1001–2000
+//   Wedding Pro 2001–3000
 //   Enterprise 3000+
 
 function bucketTier(uploads) {
   if (uploads <= 0)    return 'Free'
-  if (uploads <= 150)  return 'Basic'
-  if (uploads <= 1000) return 'Pro'
-  if (uploads <= 3000) return 'Studio'
+  if (uploads <= 1000) return 'Starter'
+  if (uploads <= 2000) return 'Popular'
+  if (uploads <= 3000) return 'Wedding Pro'
   return 'Enterprise'
 }
 

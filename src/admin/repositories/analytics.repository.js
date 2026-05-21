@@ -419,7 +419,7 @@ export async function getRevenueByClient(limit = 10) {
 // "Revenue by Album" using `albums.price` (rupees) × 100, but when a single
 // Flow 1 transaction unlocks multiple albums (client-level payment) each
 // album's snapshotted price was being read independently and the same
-// payment showed up N times — e.g. ₹129 for 2 albums rendered as ₹129
+// payment showed up N times — e.g. ₹229 for 2 albums rendered as ₹229
 // in each row.
 //
 // Truth source: `transactions.amount` (paise). One transaction = one row.

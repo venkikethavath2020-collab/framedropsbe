@@ -126,7 +126,7 @@ function variantMeta(variant, p) {
         title: 'You\'re close to your free limit',
         lead: `${p.freeUsed} of ${p.freeLimit} free images used. We'd love to see you keep going.`,
         bodyParagraphs: [
-          `Once you cross the free quota, new albums move to per-album pricing — ₹29 for the first 150 photos, scaling tier-by-tier from there. There's no monthly fee; you only pay when you publish.`,
+          `Once you cross the free quota, new albums move to per-album pricing — ₹149 for up to 1,000 photos, ₹229 up to 2,000, ₹299 up to 3,000. There's no monthly fee; you only pay when you publish.`,
           `Heads up so it doesn't surprise you mid-delivery.`,
         ],
         detail: '',
