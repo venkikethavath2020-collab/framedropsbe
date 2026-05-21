@@ -163,7 +163,7 @@ const signLimiter = rateLimit({
  *   post:
  *     tags: [Photos]
  *     summary: Get signed-upload credentials for one photo
- *     description: Returns Cloudinary/R2 signed-upload params. The browser POSTs the file directly to storage with these — bytes never touch the API.
+ *     description: Returns R2 presigned PUT credentials. The browser PUTs the file directly to R2 with these — bytes never touch the API.
  *     security: [{ BearerAuth: [] }]
  *     parameters: [{ $ref: '#/components/parameters/AlbumIdAlt' }]
  *     requestBody:

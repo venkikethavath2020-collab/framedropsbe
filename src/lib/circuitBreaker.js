@@ -6,9 +6,8 @@
  * 60s for at least 20 samples → open the breaker for 5 minutes, then
  * half-open (one trial window) before resuming."
  *
- * Originally written when the codebase still had a Cloudinary fallback;
- * with Cloudinary removed there is no automatic re-routing path, so the
- * breaker is now mostly a passive health signal. recordR2() is still
+ * R2 is the only storage backend, so the breaker has no automatic
+ * re-routing path — it's a passive health signal. recordR2() is still
  * called from finalizeUpload so the metric stays accurate; r2Healthy()
  * remains exported for callers that want to short-circuit early on a
  * known-bad backend instead of blindly retrying.

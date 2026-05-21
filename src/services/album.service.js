@@ -649,7 +649,7 @@ export async function getGallery(shareId) {
  * Selection export — returns album metadata + filenames of photos the
  * client favourited. Always available, including AFTER expiry / storage
  * cleanup, because the photo rows survive forever (only storage_url and
- * cloudinary_id get nulled). Photographers use this on day 30+ to find the
+ * storage_key get nulled). Photographers use this on day 30+ to find the
  * picked originals on their local backup and deliver final edits.
  *
  * Response shape (camelCase, FE generates TXT/CSV from this):

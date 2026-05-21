@@ -13,9 +13,7 @@ import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.j
 import { CLIENT_MAX_IMAGES, MAX_PHOTOS_PER_ALBUM } from '../config/pricing.js'
 import { query, transaction as dbTransaction } from '../config/db.js'
 import { detectImageMime, sanitizeFilename } from '../utils/imageValidation.js'
-// Storage backend — Cloudflare R2 only. The previous dual-provider abstraction
-// (Cloudinary fallback) was retired after the R2 cutover; the historic shape
-// lives in git history if you ever need to diff against it.
+// Storage backend — Cloudflare R2.
 import * as r2Provider from '../config/r2.js'
 import { recordR2 } from '../lib/circuitBreaker.js'
 
@@ -696,10 +694,10 @@ export async function deletePhoto(photoId, userId) {
     }
   })
 
-  // R2 cleanup. Legacy rows might have storage_provider=NULL but a
-  // storage_key set — handle both cases. Pre-R2 rows had only cloudinary_id;
-  // their bytes are gone (or never existed in current account), so we just
-  // skip storage cleanup for them — the DB row delete above is enough.
+  // R2 cleanup. Some legacy rows have storage_provider=NULL but a
+  // storage_key set — that's fine, we still call delete. Rows without a
+  // storage_key (very old archives) skip cleanup; the DB row delete above
+  // is enough.
   if (photo.storage_key) {
     try { await r2Provider.deleteObjects([photo.storage_key]) }
     catch (err) { console.error('[Photo] R2 cleanup failed:', err) }
