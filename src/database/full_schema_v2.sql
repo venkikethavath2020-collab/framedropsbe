@@ -13,8 +13,7 @@
 --     - Completed + unpaid albums become locked (is_locked = true)
 --     - Photographer pays ONCE for ALL locked albums per client
 --     - Tier pricing based on total images in locked albums:
---         Up to 150 → ₹29, Up to 400 → ₹59, Up to 1000 → ₹129,
---         Up to 2000 → ₹249, Up to 3000 → ₹349
+--         Up to 1000 → ₹149, Up to 2000 → ₹229, Up to 3000 → ₹299
 --     - After payment: albums marked is_paid=true, is_locked=false
 --     - Previously paid albums stay unlocked forever
 --     - Table: `transactions`

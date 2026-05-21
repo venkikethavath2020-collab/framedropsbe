@@ -5,11 +5,9 @@
  * The code auto-discovers all tiers at startup.
  *
  * Current tiers (defaults if .env is missing):
- *   0–150   images → ₹29
- *   151–400 images → ₹59
- *   401–1000 images → ₹129
- *   1001–2000 images → ₹249
- *   2001–3000 images → ₹349
+ *   1–1000   images → ₹149   (Starter)
+ *   1001–2000 images → ₹229  (Popular)
+ *   2001–3000 images → ₹299  (Wedding Pro)
  */
 
 function parsePositiveInt(value, fallback, name) {
@@ -30,11 +28,9 @@ export const CURRENCY = process.env.BILLING_CURRENCY || 'INR'
 
 // ─── Tier defaults (used when .env keys are missing) ────────────────────
 const TIER_DEFAULTS = [
-  { price: 29,  max: 150  },
-  { price: 59,  max: 400  },
-  { price: 129,  max: 1000 },
-  { price: 249, max: 2000 },
-  { price: 349, max: 3000 },
+  { price: 149, max: 1000 },
+  { price: 229, max: 2000 },
+  { price: 299, max: 3000 },
 ]
 
 // ─── Build tiers from .env (auto-discover PRICE_TIER_1..N) ─────────────
