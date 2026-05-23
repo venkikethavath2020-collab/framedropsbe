@@ -82,6 +82,10 @@ if (process.env.NODE_ENV === 'production') {
     console.error('[FATAL] MOCK_OTP_CODE must not be set in production. Remove it from the environment.')
     process.exit(1)
   }
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+    console.error('[FATAL] JWT_SECRET must be set and at least 32 characters in production.')
+    process.exit(1)
+  }
   // Hard-override Swagger off in production. Even if SWAGGER_ENABLED=true
   // leaks into prod, /api/docs stays off.
   process.env.SWAGGER_ENABLED = 'false'
