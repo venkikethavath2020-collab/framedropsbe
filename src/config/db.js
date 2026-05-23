@@ -6,18 +6,26 @@
  */
 
 import 'dotenv/config'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import pg from 'pg'
 
 const { Pool } = pg
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Supabase's prod-ca-2021 root cert — bundled so we can fully verify the
+// TLS chain instead of accepting any self-signed cert. Refresh from
+// https://supabase-downloads.s3.amazonaws.com/prod/ssl/prod-ca-2021.crt
+// if Supabase rotates their CA.
+const supabaseCa = fs.readFileSync(path.join(__dirname, 'supabase-ca.crt'), 'utf8')
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // SSL config: disable entirely for localhost, otherwise require SSL.
-  // rejectUnauthorized defaults to false for managed DB providers (Supabase, Neon, etc.)
-  // that use self-signed certs. Set DB_SSL_REJECT_UNAUTHORIZED=true in production
-  // if your provider supplies a trusted CA certificate.
   ssl: process.env.DATABASE_URL?.includes('localhost') ? false : {
-    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true',
+    ca: supabaseCa,
+    rejectUnauthorized: true,
   },
   // Default 50 — R2 PUTs land fast, so finalize calls hit the BE in
   // tighter bursts and would otherwise queue on the pool.

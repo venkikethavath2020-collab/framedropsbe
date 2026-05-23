@@ -22,6 +22,7 @@ import * as r2OrphanReaper   from '../../workers/r2OrphanReaper.worker.js'
 import * as r2Reconciliation from '../../workers/r2Reconciliation.worker.js'
 import * as calendarWorker   from '../../workers/calendar.worker.js'
 import * as lifecycleWorker  from '../../workers/lifecycle.worker.js'
+import * as dbBackupWorker   from '../../workers/dbBackup.worker.js'
 import * as emailWorker      from '../../email/email.worker.js'
 import { query } from '../../config/db.js'
 import { insertAuditLog } from '../repositories/admin.repository.js'
@@ -108,6 +109,21 @@ export const JOBS = Object.freeze({
       'pending email that has not arrived. Safe to spam — the worker no-ops if ' +
       'a tick is already in flight.',
     runner: emailWorker.runOnce,
+  },
+  dbBackup: {
+    key:           'dbBackup',
+    label:         'Database backup (pg_dump → R2)',
+    heartbeatName: 'db_backup',
+    description:
+      'Runs pg_dump (custom format), gzips the result, uploads to R2 under ' +
+      'db-backups/framedrops-YYYY-MM-DD.dump.gz, prunes anything older than ' +
+      'BACKUP_RETENTION_DAYS (default 30), and emails a status line via Brevo. ' +
+      'No cron — admin-triggered only.',
+    useful:
+      'Click before any risky change (migrations, mass updates), or daily until ' +
+      'a real scheduler is wired up. Same code path as scripts/backup-db.js — ' +
+      'safe to click; a second click while one is running is ignored.',
+    runner: dbBackupWorker.runOnce,
   },
 })
 
