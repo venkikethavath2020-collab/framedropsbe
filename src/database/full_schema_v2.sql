@@ -280,6 +280,11 @@ CREATE TABLE clients (
   phone                VARCHAR(20),
   email                TEXT,
   avatar               TEXT,
+  -- Delivery contact (peak-season HDD / pen-drive courier workflow).
+  -- All three are nullable — power-users fill, casual users skip.
+  address              TEXT,
+  alternate_phone      VARCHAR(20),
+  delivery_notes       TEXT,
   -- Sharing (client-level — one link per customer)
   share_id             TEXT UNIQUE,
   shared_at            TIMESTAMPTZ,
@@ -1364,6 +1369,7 @@ CREATE TRIGGER trg_albums_auto_lock
 --   03_feature_interests.sql         — feature_interests table
 --   04_notification_preferences.sql  — users.notification_preferences
 --   05_announcements_and_maintenance.sql — announcements + system_settings
--- All five migrations are ALREADY folded into this baseline. A fresh DB
+--   06_client_delivery_fields.sql    — clients.address + alternate_phone + delivery_notes
+-- All six migrations are ALREADY folded into this baseline. A fresh DB
 -- built from full_schema_v2.sql does NOT need to re-apply them.
 -- ═══════════════════════════════════════════════════════════════════════════════
