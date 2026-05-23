@@ -65,6 +65,7 @@ export async function findById(id, userId) {
 // against mass-assignment ("req.body passed straight through").
 const ALLOWED_CREATE_COLS = new Set([
   'name', 'user_id', 'phone', 'email', 'avatar',
+  'address', 'alternate_phone', 'delivery_notes',
   'is_default', 'share_id', 'shared_at',
   'is_payment_required', 'folder_price',
   'selection_limit', 'is_selection_limited',
@@ -72,6 +73,7 @@ const ALLOWED_CREATE_COLS = new Set([
 
 const ALLOWED_UPDATE_COLS = new Set([
   'name', 'phone', 'email', 'avatar',
+  'address', 'alternate_phone', 'delivery_notes',
   'share_id', 'shared_at',
   'is_payment_required', 'folder_price',
   'selection_limit', 'is_selection_limited',

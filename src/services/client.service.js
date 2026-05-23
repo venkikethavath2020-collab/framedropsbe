@@ -28,6 +28,8 @@ const MIN_CLIENT_PRICE_PAISE = 100 // ₹1.00 floor — stops 0.5-paise checkout
 const NAME_MAX  = 200
 const EMAIL_MAX = 320
 const PHONE_MAX = 20
+const ADDRESS_MAX = 1000
+const DELIVERY_NOTES_MAX = 2000
 // Client avatars are base64 data URIs stored inline on `clients.avatar`
 // (TEXT). The FE compresses to ~640px @ q=0.85 (see ClientFormDialog.vue);
 // detailed phone photos at that setting land in the ~80-180 KB range as
@@ -48,6 +50,20 @@ function validateOptionalPhone(v) {
   if (typeof v !== 'string') return 'Phone must be a string'
   if (v.length > PHONE_MAX) return 'Phone too long'
   if (!/^[+\d\s()-]{6,20}$/.test(v)) return 'Phone is not valid'
+  return null
+}
+
+function validateOptionalAddress(v) {
+  if (v == null || v === '') return null
+  if (typeof v !== 'string') return 'Address must be a string'
+  if (v.length > ADDRESS_MAX) return 'Address too long (max 1000 characters)'
+  return null
+}
+
+function validateOptionalDeliveryNotes(v) {
+  if (v == null || v === '') return null
+  if (typeof v !== 'string') return 'Delivery notes must be a string'
+  if (v.length > DELIVERY_NOTES_MAX) return 'Delivery notes too long (max 2000 characters)'
   return null
 }
 
@@ -88,6 +104,9 @@ function formatClient(row) {
     phone:             row.phone ?? null,
     email:             row.email ?? null,
     avatar:            row.avatar ?? null,
+    address:           row.address ?? null,
+    alternatePhone:    row.alternate_phone ?? null,
+    deliveryNotes:     row.delivery_notes ?? null,
     selectionLimit:      row.selection_limit ?? null,
     isSelectionLimited:  Boolean(row.is_selection_limited),
     isPaymentRequired:   Boolean(row.is_payment_required),
@@ -111,7 +130,7 @@ export async function getClient(id, userId) {
 }
 
 export async function createClient(userId, body) {
-  const { name, phone, email, avatar } = body || {}
+  const { name, phone, email, avatar, address, alternatePhone, deliveryNotes } = body || {}
 
   const trimmedName = typeof name === 'string' ? name.trim() : ''
   if (!trimmedName) return { error: 'Client name is required', status: 400 }
@@ -125,10 +144,21 @@ export async function createClient(userId, body) {
     return { error: 'Avatar must be a string (max 250 KB)', status: 400 }
   }
 
+  // Delivery contact fields — all optional.
+  const altPhoneErr = validateOptionalPhone(alternatePhone?.trim?.())
+  if (altPhoneErr) return { error: `Alternate ${altPhoneErr.toLowerCase()}`, status: 400 }
+  const addressErr = validateOptionalAddress(address?.trim?.())
+  if (addressErr) return { error: addressErr, status: 400 }
+  const notesErr = validateOptionalDeliveryNotes(deliveryNotes?.trim?.())
+  if (notesErr) return { error: notesErr, status: 400 }
+
   const fields = { name: trimmedName, user_id: userId }
   if (phone) fields.phone = phone.trim()
   if (email) fields.email = email.trim()
   if (avatar) fields.avatar = avatar
+  if (address) fields.address = address.trim()
+  if (alternatePhone) fields.alternate_phone = alternatePhone.trim()
+  if (deliveryNotes) fields.delivery_notes = deliveryNotes.trim()
 
   const client = await clientRepo.create(fields)
 
@@ -164,6 +194,24 @@ export async function updateClient(id, userId, body = {}) {
       return { error: 'Avatar must be a string (max 250 KB)', status: 400 }
     }
     updates.avatar = body.avatar
+  }
+  if (body.address !== undefined) {
+    const v = body.address?.trim?.() || null
+    const err = validateOptionalAddress(v)
+    if (err) return { error: err, status: 400 }
+    updates.address = v
+  }
+  if (body.alternatePhone !== undefined) {
+    const v = body.alternatePhone?.trim?.() || null
+    const err = validateOptionalPhone(v)
+    if (err) return { error: `Alternate ${err.toLowerCase()}`, status: 400 }
+    updates.alternate_phone = v
+  }
+  if (body.deliveryNotes !== undefined) {
+    const v = body.deliveryNotes?.trim?.() || null
+    const err = validateOptionalDeliveryNotes(v)
+    if (err) return { error: err, status: 400 }
+    updates.delivery_notes = v
   }
   if (body.isPaymentRequired !== undefined) {
     updates.is_payment_required = Boolean(body.isPaymentRequired)
