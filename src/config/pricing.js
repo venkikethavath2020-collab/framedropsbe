@@ -22,6 +22,10 @@ function parsePositiveInt(value, fallback, name) {
 }
 
 export const FREE_LIFETIME_IMAGE_LIMIT = parsePositiveInt(process.env.FREE_LIFETIME_IMAGE_LIMIT, 300, 'FREE_LIFETIME_IMAGE_LIMIT')
+// Per-first-client free trial cap (image count). Trial also expires after
+// TRIAL_DURATION_DAYS regardless of how many images were uploaded.
+export const TRIAL_IMAGE_LIMIT = parsePositiveInt(process.env.TRIAL_IMAGE_LIMIT, 3000, 'TRIAL_IMAGE_LIMIT')
+export const TRIAL_DURATION_DAYS = parsePositiveInt(process.env.TRIAL_DURATION_DAYS, 30, 'TRIAL_DURATION_DAYS')
 export const CLIENT_MAX_IMAGES = parsePositiveInt(process.env.CLIENT_MAX_IMAGES, 3000, 'CLIENT_MAX_IMAGES')
 export const MAX_PHOTOS_PER_ALBUM = parsePositiveInt(process.env.MAX_PHOTOS_PER_ALBUM, 500, 'MAX_PHOTOS_PER_ALBUM')
 export const CURRENCY = process.env.BILLING_CURRENCY || 'INR'

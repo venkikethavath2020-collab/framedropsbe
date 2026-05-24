@@ -275,10 +275,13 @@ export async function getUserSegmentCounts() {
 
 export async function getUserIntelligence(params = {}) {
   const { rows, total } = await repo.listUserIntelligence(params)
-  const FREE_LIMIT = Number(process.env.FREE_LIFETIME_IMAGE_LIMIT || 300)
+  // Denominator is the per-first-client trial cap. Legacy column name
+  // `freeImageLimit` is kept on the response shape so the admin FE table
+  // doesn't break — the value just reflects the new system now.
+  const TRIAL_LIMIT = Number(process.env.TRIAL_IMAGE_LIMIT || 3000)
   const data = rows.map((r) => {
     const used = Number(r.lifetime_uploads ?? 0)
-    const usagePercent = Math.min(100, Math.round((used / Math.max(1, FREE_LIMIT)) * 100))
+    const usagePercent = Math.min(100, Math.round((used / Math.max(1, TRIAL_LIMIT)) * 100))
     const conversionStatus = r.is_paid ? 'paid' : 'free'
     // segment derived per user (matches H rules approximately)
     const createdMs = new Date(r.created_at).getTime()
@@ -296,7 +299,7 @@ export async function getUserIntelligence(params = {}) {
       email: r.email,
       segment,
       totalImagesUsed: used,
-      freeImageLimit: FREE_LIMIT,
+      freeImageLimit: TRIAL_LIMIT,
       usagePercent,
       lastActivity: r.last_activity ? new Date(r.last_activity).toISOString() : new Date(0).toISOString(),
       conversionStatus,

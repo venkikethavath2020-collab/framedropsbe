@@ -6,6 +6,7 @@ import * as clientRepo from '../repositories/client.repository.js'
 import * as albumRepo from '../repositories/album.repository.js'
 import * as photoRepo from '../repositories/photo.repository.js'
 import * as billingService from './billing.service.js'
+import * as trialService from './trial.service.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
 import * as deliveryRepo from '../repositories/delivery.repository.js'
 import * as accessCodeRepo from '../repositories/access-code.repository.js'
@@ -274,12 +275,26 @@ export async function deleteClient(id, userId, { confirmed = false } = {}) {
     }
   }
 
+  // Trial is permanently bound on the first successful upload. Deleting
+  // the trial client does NOT refund the trial — that would let users
+  // farm it by uploading, deleting, uploading again. If the deleted
+  // client IS the active trial client, force-consume the trial so the
+  // user can't end up in the orphaned 'active && trial_client_id=NULL'
+  // state where the FE shows a misleading 0/3000 chip with no bound
+  // client. consumeTrial is forward-only and idempotent — safe to call
+  // when status is already 'consumed' (no-op).
+  const wasTrialClient = !!existing.is_trial_client
   await dbTransaction(async (client) => {
     for (const album of albums) {
       await photoRepo.deleteByAlbumId(album.id, client)
     }
+    if (wasTrialClient) {
+      await trialService.consumeTrial(userId, client)
+    }
     await clientRepo.deleteById(id, client)
-    // client_id FK on albums is ON DELETE CASCADE, so albums go with the client.
+    // client_id FK on albums is ON DELETE CASCADE.
+    // users.trial_client_id FK is ON DELETE SET NULL — clears the pointer
+    // after consumeTrial has already finalised the state above.
   })
 
   if (r2Keys.length) {

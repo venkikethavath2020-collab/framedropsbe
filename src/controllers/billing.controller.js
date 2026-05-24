@@ -9,6 +9,7 @@
  */
 
 import * as billingService from '../services/billing.service.js'
+import * as trialService from '../services/trial.service.js'
 import * as R from '../utils/response.js'
 
 export async function getBillingStatus(req, res) {
@@ -37,4 +38,10 @@ export async function getDashboardStats(req, res) {
 export async function getAlbumTracking(req, res) {
   const result = await billingService.getAlbumTrackingList(req.user.id, req.query)
   return R.success(res, result.data, 'Album tracking fetched', { meta: result.meta })
+}
+
+export async function getTrialStatus(req, res) {
+  const result = await trialService.getTrialStatus(req.user.id)
+  if (result.error) return R.error(res, result.error, result.status || 400)
+  return R.success(res, result.data, 'Trial status fetched')
 }

@@ -10,6 +10,7 @@
  */
 
 import * as billingRepo from '../repositories/billing.repository.js'
+import * as trialRepo from '../repositories/trial.repository.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
 import { transaction as dbTransaction } from '../config/db.js'
 import {
@@ -108,7 +109,14 @@ export async function getLockedAlbumsSummary(userId, clientId = null) {
   }))
 
   const totalImages = albums.reduce((sum, a) => sum + a.imageCount, 0)
-  const totalChargeableImages = albums.reduce((sum, a) => sum + a.chargeableImages, 0)
+  // Fall back to imageCount for albums where chargeable_images wasn't set
+  // (legacy albums pre-recalc, or albums healed by migration 08_*). Mirrors
+  // the same fallback in payment.service.createOrder so the modal price and
+  // the gateway price stay aligned.
+  const totalChargeableImages = albums.reduce(
+    (sum, a) => sum + (a.chargeableImages > 0 ? a.chargeableImages : a.imageCount),
+    0,
+  )
   const totalAlbums = albums.length
 
   // Sum the stored per-album prices. Each album's price was calculated
@@ -188,23 +196,28 @@ export async function getLockedAlbumsSummary(userId, clientId = null) {
 /**
  * Recalculate an album's pricing based on its current imageCount.
  *
- * Called after every photo upload or deletion. The free quota is a
- * lifetime wallet consumed by uploaded images — NOT by selections.
+ * Called after every photo upload or deletion. Pricing depends on
+ * whether the album sits on the user's TRIAL CLIENT during the active
+ * trial window:
  *
- * Inside a serialized transaction:
- *   1. Roll back this album's previous free_consumed from the user wallet.
- *   2. Recompute: freeConsumed, chargeableImages, price, isPaid.
- *   3. Apply the new allocation to both the album and the user wallet.
+ *   trial path  → chargeable_images = 0, price = 0, is_paid = true
+ *                 (free_consumed = imageCount, retained as the audit
+ *                 trail for how much trial quota this album used)
+ *   paid  path  → chargeable_images = imageCount, price = tier price,
+ *                 is_paid = (imageCount === 0)
  *
- * This is idempotent — calling it twice with the same imageCount
- * produces the same result (rollback + reapply).
+ * The entitlement lock from the prior design still holds: an album
+ * already marked is_paid via a real transaction is never re-priced —
+ * it's permanently entitled.
+ *
+ * Idempotent: rerunning produces the same result.
  */
 export async function recalculateAlbumPricing(albumId, userId) {
   try {
     await dbTransaction(async (client) => {
-      // Lock album row to get authoritative imageCount
+      // Lock album row to get authoritative imageCount + client_id.
       const { rows: albumRows } = await client.query(
-        `SELECT image_count, COALESCE(free_consumed, 0)::int AS free_consumed,
+        `SELECT image_count, client_id, COALESCE(free_consumed, 0)::int AS free_consumed,
                 is_paid, transaction_id
          FROM albums WHERE id = $1 AND user_id = $2 FOR UPDATE`,
         [albumId, userId]
@@ -212,35 +225,44 @@ export async function recalculateAlbumPricing(albumId, userId) {
       const album = albumRows[0]
       if (!album) return // album not found — skip silently
 
-      // If the album was explicitly paid via payment flow (has a
-      // transaction_id), do NOT recalculate — the entitlement is locked.
+      // Entitlement lock: an album that was explicitly paid for via a
+      // real transaction is permanently entitled. Don't re-price.
       if (album.is_paid && album.transaction_id) return
 
       const imageCount = album.image_count ?? 0
-      const prevFreeConsumed = album.free_consumed
 
-      // Rollback previous free allocation for this album
-      if (prevFreeConsumed > 0) {
-        await billingRepo.decrementFreeUsed(userId, prevFreeConsumed, client)
-      }
+      // Decide trial vs paid path from the user's trial state. Read-only
+      // here — no FOR UPDATE — because the upload gate already serialized
+      // the bind decision under FOR UPDATE during finalize. Reading
+      // stale-by-a-millisecond data here can only mis-classify a freshly-
+      // bound trial as paid (one extra recalc on the next upload fixes
+      // it). It cannot give an unentitled photographer a free download
+      // because download access keys off albums.is_paid, which only the
+      // trial path sets to true when chargeable_images = 0 — and the
+      // trial path is only reachable when the user IS on trial.
+      const user = await trialRepo.getTrialFields(userId)
+      const isTrialPath = !!(
+        user
+        && user.trial_status === 'active'
+        && user.trial_client_id === album.client_id
+        && (!user.trial_expires_at || new Date(user.trial_expires_at) >= new Date())
+      )
 
-      // Lock user row and read current free_used (after rollback)
-      const currentFreeUsed = await billingRepo.getUserFreeUsedForUpdate(userId, client)
-      const freeRemaining = Math.max(0, FREE_LIFETIME_IMAGE_LIMIT - currentFreeUsed)
+      let chargeableImages
+      let freeConsumed
+      let price
+      let isPaid
 
-      const freeConsumed = Math.min(imageCount, freeRemaining)
-      const chargeableImages = Math.max(0, imageCount - freeRemaining)
-
-      // Apply new free allocation
-      if (freeConsumed > 0) {
-        await billingRepo.incrementFreeUsed(userId, freeConsumed, client)
-      }
-
-      let price = 0
-      let isPaid = true
-      if (chargeableImages > 0) {
-        price = calculateAlbumPrice(chargeableImages)
-        isPaid = false
+      if (isTrialPath) {
+        chargeableImages = 0
+        freeConsumed = imageCount
+        price = 0
+        isPaid = true
+      } else {
+        chargeableImages = imageCount
+        freeConsumed = 0
+        price = imageCount > 0 ? calculateAlbumPrice(imageCount) : 0
+        isPaid = imageCount === 0
       }
 
       await billingRepo.setAlbumPricing(albumId, {
@@ -273,11 +295,23 @@ export async function checkUploadLimit(userId, albumId) {
  *
  * Priority (first matching branch wins):
  *   1. Album explicitly paid (`is_paid = true`) → allow.
- *   2. Album price is 0 (fully covered by free quota) → allow and
- *      auto-heal `is_paid` to true as a safeguard.
- *   3. Legacy: album was created under old free-tier snapshot
- *      (`is_free_tier = true`) → allow permanently.
- *   4. Otherwise → require payment.
+ *      Set by either (a) payment side-effects (with a real transaction_id),
+ *      or (b) trial-path recalculateAlbumPricing (trial covers it).
+ *      Both are authoritative writes — no inference.
+ *   2. Legacy: album was created under the old free-tier snapshot
+ *      (`is_free_tier = true`, pre per-client-trial system) → allow.
+ *   3. Otherwise → require payment.
+ *
+ * SECURITY NOTE — removed `price === 0 AND chargeable_images === 0` auto-heal.
+ * That branch made sense under the old 300-lifetime model where price=0
+ * deterministically meant "fully covered by free quota". Under the
+ * per-first-client trial model, those values are ALSO the natural state
+ * of a paid-path album BEFORE recalculateAlbumPricing runs (which now
+ * happens after the upload transaction commits). If recalc was ever
+ * delayed or failed, the safeguard would flip a paid-path album to
+ * is_paid=true permanently — letting the photographer transfer for ₹0.
+ * Trial-covered albums get is_paid=true set EXPLICITLY by the trial
+ * branch of recalculateAlbumPricing, so this backdoor is unnecessary.
  *
  * NOTE: `clients.is_paid` is intentionally NOT consulted here. That flag
  * was the source of the "₹0 second album" bug — once true, every future
@@ -288,23 +322,10 @@ export async function checkDownloadAccess(userId, albumId) {
   const album = await billingRepo.getAlbumBilling(albumId, userId)
   if (!album) return { allowed: false, reason: 'Album not found' }
 
-  // 1. Explicitly paid
+  // 1. Explicitly paid (real payment OR trial-covered, both write is_paid=true).
   if (album.is_paid) return { allowed: true }
 
-  // 2. Safeguard: price === 0 means the album was fully free — force is_paid
-  if (album.price === 0 && album.chargeable_images === 0 && album.image_count > 0) {
-    // Auto-heal: mark as paid so future checks are instant
-    try {
-      const { query: rawQuery } = await import('../config/db.js')
-      await rawQuery(
-        'UPDATE albums SET is_paid = true, is_locked = false WHERE id = $1 AND is_paid = false',
-        [albumId]
-      )
-    } catch (_) { /* best effort */ }
-    return { allowed: true }
-  }
-
-  // 3. Legacy backward compat: old albums with is_free_tier snapshot
+  // 2. Legacy backward compat: old albums with is_free_tier snapshot
   if (album.is_free_tier) return { allowed: true }
 
   return {
