@@ -24,6 +24,7 @@ import { startEmailWorker, stopEmailWorker } from './src/email/email.worker.js'
 import { startLifecycleWorker, stopLifecycleWorker } from './src/workers/lifecycle.worker.js'
 import { startStalePendingWorker, stopStalePendingWorker } from './src/workers/stalePending.worker.js'
 import { startCalendarReminderWorker, stopCalendarReminderWorker } from './src/workers/calendar.worker.js'
+import { startTrialExpiryWorker, stopTrialExpiryWorker } from './src/workers/trialExpiry.worker.js'
 import * as R from './src/utils/response.js'
 
 import authRoutes from './src/routes/auth.routes.js'
@@ -381,6 +382,7 @@ startEmailWorker()
 startLifecycleWorker()
 startStalePendingWorker()
 startCalendarReminderWorker()
+startTrialExpiryWorker()
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
 async function shutdown() {
@@ -391,6 +393,7 @@ async function shutdown() {
   stopLifecycleWorker()
   stopStalePendingWorker()
   stopCalendarReminderWorker()
+  stopTrialExpiryWorker()
   await stopEmailWorker()
   server.close(async () => {
     await closePool()

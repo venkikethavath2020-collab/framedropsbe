@@ -12,6 +12,7 @@
 import * as razorpay from './razorpay.service.js'
 import * as paymentRepo from './payment.repository.js'
 import * as billingRepo from '../repositories/billing.repository.js'
+import * as trialService from '../services/trial.service.js'
 import * as couponService from '../services/coupon.service.js'
 import * as couponRepo from '../repositories/coupon.repository.js'
 import { calculateAlbumPrice } from '../config/pricing.js'
@@ -136,6 +137,10 @@ async function applySideEffects(tx, client) {
     await billingRepo.unlockAlbums(albumIds, tx.id, tx.user_id, client)
   }
   await billingRepo.markFreeTrialUsed(tx.user_id, client)
+  // Paying for ANY client retires the per-client free trial: the
+  // photographer is now a paying customer and the trial has no further
+  // role. Forward-only / idempotent.
+  await trialService.consumeTrial(tx.user_id, client)
 
   // Combo-pay: finalize the wallet reservation that was held against this
   // transaction. If none exists (Razorpay-only payment) this is a no-op.

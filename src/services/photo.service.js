@@ -8,6 +8,7 @@ import * as albumRepo from '../repositories/album.repository.js'
 import * as userRepo from '../repositories/user.repository.js'
 import * as billingService from './billing.service.js'
 import * as billingRepo from '../repositories/billing.repository.js'
+import * as trialService from './trial.service.js'
 import * as clientRepo from '../repositories/client.repository.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
 import { CLIENT_MAX_IMAGES, MAX_PHOTOS_PER_ALBUM } from '../config/pricing.js'
@@ -343,6 +344,15 @@ export async function finalizeUpload(albumId, userId, body) {
           err.status = 403; err.code = 'CLIENT_LIMIT_REACHED'
           throw err
         }
+
+        // Trial gate runs AFTER the per-client cap so a paid-path user
+        // hitting their 3000-image client cap gets the correct error.
+        // The gate locks the user row and either approves the path or
+        // throws with .status = 402.
+        await trialService.evaluateUploadGate(
+          { userId, clientId: album.client_id, addCount: 1 },
+          client
+        )
       }
 
       const upserted = await photoRepo.upsertByStorageKey({
@@ -370,6 +380,20 @@ export async function finalizeUpload(albumId, userId, body) {
       // upload — only on share (see comment in the legacy path above).
       if (upserted.inserted) {
         await albumRepo.incrementImageCount(albumId, client)
+
+        // Post-insert trial hooks (same transaction): bind on first
+        // upload, then consume if this insert pushed total to the cap.
+        // Both are idempotent / forward-only.
+        if (album.client_id) {
+          await trialService.bindTrialIfFirstUpload(
+            { userId, clientId: album.client_id },
+            client
+          )
+          await trialService.consumeTrialIfLimitReached(
+            { userId, clientId: album.client_id },
+            client
+          )
+        }
       }
       return { photo: upserted, isNew: upserted.inserted }
     })
@@ -610,6 +634,17 @@ export async function bulkFinalizeUpload(albumId, userId, body) {
           err.status = 403; err.code = 'CLIENT_LIMIT_REACHED'
           throw err
         }
+
+        // Trial gate — locks user row + validates batch fits in trial
+        // quota (when on trial path). Throws .status = 402 if exceeded.
+        // Uses totalInserts (the batch claim), not newCount — the
+        // retried-finalize idempotency path collapses dupes in the
+        // upsert below, but the gate must conservatively assume all
+        // are new to stay safe under the FOR UPDATE.
+        await trialService.evaluateUploadGate(
+          { userId, clientId: album.client_id, addCount: totalInserts },
+          client
+        )
       }
 
       const albumRow = await client.query('SELECT image_count FROM albums WHERE id = $1 FOR UPDATE', [albumId])
@@ -633,6 +668,18 @@ export async function bulkFinalizeUpload(albumId, userId, body) {
         await albumRepo.incrementImageCountBy(albumId, newCount, client)
         // Status is NOT flipped on upload — only on share. See the legacy
         // single-upload path above for the full reasoning.
+
+        // Post-insert trial hooks (same transaction). Both idempotent.
+        if (album.client_id) {
+          await trialService.bindTrialIfFirstUpload(
+            { userId, clientId: album.client_id },
+            client
+          )
+          await trialService.consumeTrialIfLimitReached(
+            { userId, clientId: album.client_id },
+            client
+          )
+        }
       }
       return { rows: r2Inserted, newCount }
     })

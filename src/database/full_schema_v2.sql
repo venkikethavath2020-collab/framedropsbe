@@ -1,22 +1,28 @@
 -- ============================================================================
 -- Framedrops — Complete Database Schema (Clean Install)
--- Generated: 2026-05-13
+-- Generated: 2026-05-24 (post-trial-system, post migrations 07–10)
 -- Run this on a FRESH database. Drops everything and recreates.
 
 -- TWO SEPARATE PAYMENT SYSTEMS:
 --
 --   FLOW 1 — Photographer pays Platform (batch album downloads)
---     - Photographer gets 300 free lifetime image uploads
---     - Each client can have max 3000 images across all albums
+--     - Per-first-client FREE TRIAL: 3,000 photos / 30 days, bound on
+--       the photographer's FIRST successful upload to any client.
+--       Once consumed (cap, expiry, OR payment), every future client
+--       is billable from album one. The trial is PERMANENTLY BOUND —
+--       deleting the trial client does NOT refund it. State lives on
+--       users.trial_status (unused → active → consumed; consumed is
+--       terminal). See trial.service.js / trial.repository.js.
+--     - Each client can have max 3,000 images across all albums
 --     - Each album can hold max 500 images (auto-split on upload)
 --     - Albums lifecycle: pending → in_review → completed
 --     - Completed + unpaid albums become locked (is_locked = true)
 --     - Photographer pays ONCE for ALL locked albums per client
 --     - Tier pricing based on total images in locked albums:
---         Up to 1000 → ₹149, Up to 2000 → ₹229, Up to 3000 → ₹299
+--         Up to 1,000 → ₹149, Up to 2,000 → ₹229, Up to 3,000 → ₹299
 --     - After payment: albums marked is_paid=true, is_locked=false
 --     - Previously paid albums stay unlocked forever
---     - Table: `transactions`
+--     - Tables: `transactions`, trial fields on `users` + `clients`
 --
 --   FLOW 2 — Customer pays Photographer (gallery access)
 --     - Photographer sets a price on the client gallery
@@ -153,10 +159,32 @@ CREATE TABLE users (
   -- auth_provider is informational: 'password' | 'google' | 'phone' | 'otp'.
   google_sub              TEXT,
   auth_provider           TEXT,
-  -- Billing
+  -- Billing — legacy lifetime-quota fields (300-image free quota era).
+  -- Retained because:
+  --   - has_used_free_trial: still written by payment.service.applySideEffects
+  --     for audit; trial.service.consumeTrial is the authoritative flag.
+  --   - lifetime_uploads: monotonic upload counter (never decremented);
+  --     used by the trial-heal migrations 09 and 10 as a permanent
+  --     "this user has ever uploaded" signal that survives cascade deletes.
+  --   - free_used: legacy free-quota counter; no longer enforced but read
+  --     by admin analytics for backfill compatibility.
   has_used_free_trial     BOOLEAN NOT NULL DEFAULT false,
-  lifetime_uploads        INTEGER NOT NULL DEFAULT 0,          -- global free limit counter
-  free_used               INTEGER NOT NULL DEFAULT 0,          -- free-quota images consumed across all albums (cap = 300)
+  lifetime_uploads        INTEGER NOT NULL DEFAULT 0,
+  free_used               INTEGER NOT NULL DEFAULT 0,
+  -- Per-first-client free trial. State machine:
+  --   unused → active   (on FIRST successful upload to any client; binds
+  --                      the trial to that client_id permanently)
+  --   active → consumed (cap hit, 30-day window expired, OR photographer
+  --                      pays for any client)
+  --   consumed is TERMINAL. No code path resets to 'unused' — deleting
+  --   the trial client just nulls trial_client_id via the FK, leaving
+  --   trial_status='active' or 'consumed' standing forever.
+  trial_status            TEXT NOT NULL DEFAULT 'unused'
+                          CHECK (trial_status IN ('unused', 'active', 'consumed')),
+  trial_client_id         UUID,                                -- FK added after clients table below
+  trial_started_at        TIMESTAMPTZ,
+  trial_expires_at        TIMESTAMPTZ,
+  trial_image_limit       INTEGER NOT NULL DEFAULT 3000,
   -- Plan / lifecycle (active_plan + plan_expires_at populated by future subscriptions work)
   active_plan             VARCHAR(40) NOT NULL DEFAULT 'free',
   plan_expires_at         TIMESTAMPTZ,
@@ -195,6 +223,14 @@ CREATE INDEX idx_users_reset_token ON users(reset_token) WHERE reset_token IS NO
 CREATE UNIQUE INDEX idx_users_google_sub
   ON users (google_sub)
   WHERE google_sub IS NOT NULL;
+-- Trial: one client per user. Partial unique guards against double-bind.
+CREATE UNIQUE INDEX uq_users_trial_client
+  ON users(trial_client_id)
+  WHERE trial_client_id IS NOT NULL;
+-- Trial expiry cron lookup.
+CREATE INDEX idx_users_trial_expires_active
+  ON users(trial_expires_at)
+  WHERE trial_status = 'active';
 
 -- Lifecycle worker scans
 CREATE INDEX idx_users_last_login_active
@@ -297,6 +333,11 @@ CREATE TABLE clients (
   is_paid              BOOLEAN NOT NULL DEFAULT false,
   transaction_id       UUID,                                    -- FK to transactions (set after Flow 1 payment)
   is_default           BOOLEAN NOT NULL DEFAULT false,
+  -- Trial binding (set when this client receives the user's first upload).
+  -- trial_image_limit snapshotted from users.trial_image_limit at bind
+  -- time so the cap is stable even if the global default is later changed.
+  is_trial_client      BOOLEAN NOT NULL DEFAULT false,
+  trial_image_limit    INTEGER,
   -- Timestamps
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -305,6 +346,21 @@ CREATE TABLE clients (
 CREATE INDEX idx_clients_user      ON clients(user_id);
 CREATE INDEX idx_clients_share     ON clients(share_id) WHERE share_id IS NOT NULL;
 CREATE INDEX idx_clients_user_paid ON clients(user_id, is_paid) WHERE is_paid = false;
+CREATE INDEX idx_clients_user_trial
+  ON clients(user_id, is_trial_client)
+  WHERE is_trial_client = true;
+
+-- Deferred FK: users.trial_client_id → clients(id). Declared after the
+-- clients table exists. ON DELETE SET NULL clears the pointer when the
+-- trial client is deleted. Pairing rule in client.service.deleteClient:
+-- if the deleted client IS the trial client, force-consume the trial
+-- (status → 'consumed') in the same transaction. Without that pairing,
+-- the user lands in an orphan 'active && trial_client_id=NULL' state
+-- that renders a misleading "0 / 3000" chip on the FE. The trial is
+-- still permanently bound — consume is forward-only, never refunds.
+ALTER TABLE users
+  ADD CONSTRAINT fk_users_trial_client
+  FOREIGN KEY (trial_client_id) REFERENCES clients(id) ON DELETE SET NULL;
 
 CREATE TRIGGER trg_clients_updated_at
   BEFORE UPDATE ON clients FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -1363,13 +1419,20 @@ CREATE TRIGGER trg_albums_auto_lock
 -- Indexes: 80+ (regular + partial + unique)
 -- Seed rows: 2 in system_settings (maintenance.enabled, maintenance.message)
 --
--- Apply order for migrations on top of this baseline:
---   01_album_transfer_status.sql     — albums.transfer_status + counters
---   02_withdrawal_user_cancel.sql    — withdrawals.cancelled status
---   03_feature_interests.sql         — feature_interests table
---   04_notification_preferences.sql  — users.notification_preferences
+-- Migrations folded into this baseline (do NOT re-apply on a fresh DB):
+--   01_album_transfer_status.sql        — albums.transfer_status + counters
+--   02_withdrawal_user_cancel.sql       — withdrawals.cancelled status
+--   03_feature_interests.sql            — feature_interests table
+--   04_notification_preferences.sql     — users.notification_preferences
 --   05_announcements_and_maintenance.sql — announcements + system_settings
---   06_client_delivery_fields.sql    — clients.address + alternate_phone + delivery_notes
--- All six migrations are ALREADY folded into this baseline. A fresh DB
--- built from full_schema_v2.sql does NOT need to re-apply them.
+--   06_client_delivery_fields.sql       — clients.address + alternate_phone + delivery_notes
+--   07_free_trial_per_client.sql        — users.trial_* + clients.is_trial_client
+--   08_heal_trial_bypass_autoheal.sql   — (heal-only; no DDL — safe to skip on fresh DB)
+--   09_heal_trial_reset_loophole.sql    — (heal-only; no DDL — safe to skip on fresh DB)
+--   10_heal_trial_after_cascade_delete.sql — (heal-only; no DDL — safe to skip on fresh DB)
+--   11_heal_trial_orphan_active.sql        — (heal-only; no DDL — safe to skip on fresh DB)
+--
+-- A fresh DB built from full_schema_v2.sql does NOT need to re-apply any
+-- of the above. The heal migrations (08/09/10/11) only target rows in
+-- specific corrupt states that a fresh DB cannot be in.
 -- ═══════════════════════════════════════════════════════════════════════════════
