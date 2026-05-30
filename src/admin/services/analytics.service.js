@@ -60,6 +60,7 @@ export async function getDashboardKpis(params = {}) {
       const [
         revenue, prevRevenue,
         activeUsers,
+        onlineNow,
         photos, prevPhotos,
         userCounts,
         storageBytes,
@@ -68,6 +69,7 @@ export async function getDashboardKpis(params = {}) {
         repo.getKpiTotalRevenuePaise(from, to),
         repo.getKpiTotalRevenuePaise(prevFrom, prevTo),
         repo.getKpiActiveUsers(30),
+        repo.getKpiOnlineNow(5),
         repo.getKpiPhotosUploaded(from, to),
         repo.getKpiPhotosUploaded(prevFrom, prevTo),
         repo.getKpiUserCounts(),
@@ -110,6 +112,15 @@ export async function getDashboardKpis(params = {}) {
           color: 'primary',
           format: 'number',
           subtitle: `${activeUsers} active in last 30d`,
+        },
+        {
+          label: 'Online Now',
+          value: onlineNow,
+          sparkline: [],
+          icon: 'mdi-circle-medium',
+          color: onlineNow > 0 ? 'success' : 'primary',
+          format: 'number',
+          subtitle: 'Last 5 minutes · live presence',
         },
         {
           label: 'Images Uploaded',

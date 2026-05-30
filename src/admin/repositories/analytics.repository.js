@@ -38,6 +38,18 @@ export async function getKpiActiveUsers(sinceDays = 30) {
   return Number(rows[0]?.active ?? 0)
 }
 
+export async function getKpiOnlineNow(withinMinutes = 5) {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS online
+       FROM users
+      WHERE role = 'photographer'
+        AND is_disabled = false
+        AND last_login_at > NOW() - ($1::int || ' minutes')::interval`,
+    [withinMinutes],
+  )
+  return Number(rows[0]?.online ?? 0)
+}
+
 export async function getKpiPhotosUploaded(from, to) {
   const { rows } = await query(
     `SELECT COUNT(*)::bigint AS uploads
