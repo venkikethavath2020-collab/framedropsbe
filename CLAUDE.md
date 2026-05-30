@@ -13,7 +13,7 @@
 - Photographer onboarding, authentication (JWT, OTP, Google), client/album/photo CRUD
 - Cloudinary direct-upload signing (server signs, browser uploads — bytes never hit this server)
 - Two independent payment flows on Razorpay (INR):
-  - **Flow 1 — Photographer → Platform** (`/v1/payments`): photographer pays for album batches past the 300-image free quota
+  - **Flow 1 — Photographer → Platform** (`/v1/payments`): photographer pays per album. Each photographer gets a one-time per-first-client free trial (3,000 photos / 30 days, bound on first successful upload, terminal once consumed). See `src/services/trial.service.js`.
   - **Flow 2 — Customer → Photographer** (`/v1/client-payments`): end-clients pay the photographer for galleries
 - Wallet (photographer earnings from Flow 2) + withdrawals
 - Album expiry + Cloudinary storage cleanup via cron workers
@@ -77,8 +77,10 @@ framedropsbe/
 │   ├── config/
 │   │   ├── db.js           # pg.Pool, query(), transaction(), getClient(), closePool()
 │   │   ├── cloudinary.js   # signDirectUpload(), getResource(), buildThumbUrl(), deleteResource()
-│   │   └── pricing.js      # FREE_LIFETIME_IMAGE_LIMIT (300), CLIENT_MAX_IMAGES (3000),
-│   │                       #   MAX_PHOTOS_PER_ALBUM (500), TIERS, calculateAlbumPrice()
+│   │   └── pricing.js      # TRIAL_IMAGE_LIMIT (3000), TRIAL_DURATION_DAYS (30),
+│   │                       #   CLIENT_MAX_IMAGES (3000), MAX_PHOTOS_PER_ALBUM (500),
+│   │                       #   TIERS, calculateAlbumPrice(). Legacy
+│   │                       #   FREE_LIFETIME_IMAGE_LIMIT (300) still exported.
 │   ├── routes/             # 12 route files (auth, album, photo, client, billing,
 │   │                       #   notification, calendar, selection, upload, client-auth,
 │   │                       #   feedback, webhook)
@@ -162,8 +164,8 @@ The frontend's `ENDPOINTS` map (in `../framedrops/src/api/endpoints.ts`) mirrors
 
 | Table | Purpose |
 |---|---|
-| `users` | Photographers (and admins via role flag). `free_used`, `lifetime_uploads`, `token_version`, auth provider data. |
-| `clients` | Photographer's customer contacts. `share_id` (public gallery link), `is_payment_required` (Flow 2 gate), `is_paid` **(derived — see invariants)**, `transaction_id` (latest Flow 1 payment). |
+| `users` | Photographers (and admins via role flag). Trial state (`trial_status`, `trial_client_id`, `trial_started_at`, `trial_expires_at`, `trial_image_limit`), `token_version`, auth provider data, legacy quota counters (`free_used`, `lifetime_uploads`, `has_used_free_trial`). |
+| `clients` | Photographer's customer contacts. `share_id` (public gallery link), `is_payment_required` (Flow 2 gate), `is_paid` **(derived — see invariants)**, `transaction_id` (latest Flow 1 payment), `is_trial_client` (true on the one client the trial bound to). |
 | `albums` | Photo galleries, scoped to a client. `status: pending → in_review → completed`, `is_paid`, `is_locked`, `price`, `chargeable_images`, `free_consumed`, `is_free_tier` (legacy), `delivery_id`, `expires_at`, `is_expired`, `storage_cleaned_at`. |
 | `photos` | Individual images. `cloudinary_id`, `storage_url`, `thumbnail_url`, dimensions, `upload_status`. |
 | `client_deliveries` | Groups albums into Flow 2 payment units. `is_paid`, `price` (paise). |
@@ -177,22 +179,35 @@ The frontend's `ENDPOINTS` map (in `../framedrops/src/api/endpoints.ts`) mirrors
 ### Billing-relevant columns (memorize these)
 
 ```sql
--- users
-free_used INTEGER DEFAULT 0          -- cumulative free-quota consumption
-lifetime_uploads INTEGER DEFAULT 0   -- informational only; do NOT gate on this
+-- users (trial fields — current source of truth)
+trial_status TEXT NOT NULL DEFAULT 'unused'
+  CHECK (trial_status IN ('unused','active','consumed'))    -- 'consumed' is TERMINAL
+trial_client_id UUID                  -- one client per user; FK ON DELETE SET NULL
+trial_started_at TIMESTAMPTZ          -- stamped on bind
+trial_expires_at TIMESTAMPTZ          -- bind time + 30 days
+trial_image_limit INTEGER DEFAULT 3000
+
+-- users (legacy quota — kept but no longer enforced)
+free_used INTEGER DEFAULT 0          -- legacy lifetime-quota counter; not enforced
+lifetime_uploads INTEGER DEFAULT 0   -- monotonic upload counter; used by heal migrations 09-11
+has_used_free_trial BOOLEAN DEFAULT false -- legacy audit flag; trial_status is authoritative
 token_version INTEGER DEFAULT 0      -- bump to invalidate all JWTs for this user
 
 -- clients
 is_paid BOOLEAN DEFAULT false        -- DERIVED: NOT EXISTS(unpaid completed albums)
 transaction_id UUID                  -- latest Flow 1 payment (audit only)
+is_trial_client BOOLEAN DEFAULT false -- true on the one client the trial bound to
+trial_image_limit INTEGER            -- snapshotted from users.trial_image_limit on bind
 
 -- albums
 is_paid BOOLEAN DEFAULT false        -- TRUTH SOURCE for Flow 1 payment access
+                                      -- Set by either (a) payment side-effects (with transaction_id)
+                                      -- or (b) trial-path recalculateAlbumPricing (trial covers it)
 is_locked BOOLEAN DEFAULT false
-price INTEGER DEFAULT 0              -- snapshot at submission time, in rupees (NOT paise)
-chargeable_images INTEGER DEFAULT 0  -- imageCount minus free_consumed
-free_consumed INTEGER DEFAULT 0      -- per-album allocation from user's free wallet
-is_free_tier BOOLEAN                 -- LEGACY: old albums created under free-tier snapshot
+price INTEGER DEFAULT 0              -- snapshot at submission time, in rupees (NOT paise). 0 on trial path.
+chargeable_images INTEGER DEFAULT 0  -- imageCount on paid path; 0 on trial path
+free_consumed INTEGER DEFAULT 0      -- imageCount on trial path; 0 on paid path
+is_free_tier BOOLEAN                 -- LEGACY: pre-trial-system snapshot
 transaction_id UUID                  -- the payment that unlocked this album
 
 -- transactions (Flow 1)
@@ -490,28 +505,43 @@ export async function markClientPaid(clientId, transactionId, userId, client) {
 
 | imageCount | Price (₹) |
 |---|---|
-| 1 – 150 | 29 |
-| 151 – 400 | 59 |
-| 401 – 1,000 | 129 |
-| 1,001 – 2,000 | 249 |
-| 2,001 – 3,000 | 349 |
+| 1 – 1,000 | 149 |
+| 1,001 – 2,000 | 229 |
+| 2,001 – 3,000 | 299 |
 
-- `FREE_LIFETIME_IMAGE_LIMIT = 300` (per photographer, lifetime)
+- `TRIAL_IMAGE_LIMIT = 3000` (per-first-client free trial cap)
+- `TRIAL_DURATION_DAYS = 30` (per-first-client free trial window)
 - `CLIENT_MAX_IMAGES = 3000` (per customer contact)
 - `MAX_PHOTOS_PER_ALBUM = 500` (per album; frontend auto-splits)
 - Tiers are env-overridable via `PRICE_TIER_<n>` / `PRICE_TIER_<n>_MAX`. `calculateAlbumPrice(imageCount)` throws `PriceOutOfRangeError` if `imageCount > top tier`.
+- **Legacy:** `FREE_LIFETIME_IMAGE_LIMIT = 300` is still exported but no longer enforced. Read by admin analytics and a few legacy UI surfaces only.
 
-#### Free-quota accounting
+#### Free-trial accounting (per first client)
 
-Free quota is a per-photographer **lifetime wallet** consumed by uploaded images (not selections). Tracked on `users.free_used`. Per-album allocation lives on `albums.free_consumed`. On every upload/delete, [`recalculateAlbumPricing`](src/services/billing.service.js):
+Replaces the old 300-image lifetime wallet. State lives entirely on `users` (no per-album wallet accounting):
 
-1. Locks the album row (`SELECT … FOR UPDATE`).
-2. **Skips recalculation** if `is_paid = true AND transaction_id IS NOT NULL` (entitlement is locked).
-3. Rolls back this album's previous `free_consumed` from the user wallet.
-4. Recomputes `freeConsumed = min(imageCount, freeRemaining)` and `chargeableImages = max(0, imageCount - freeRemaining)`.
-5. Re-applies the new allocation atomically.
+- `users.trial_status`: `'unused' | 'active' | 'consumed'`. **`consumed` is terminal** — no code path resets it.
+- `users.trial_client_id`: the one client the trial binds to. FK `ON DELETE SET NULL` (and `client.service.deleteClient` force-consumes if this client is the trial client).
+- `users.trial_started_at` / `trial_expires_at`: 30-day window stamped on bind.
+- `users.trial_image_limit`: default `3000`, snapshotted to `clients.trial_image_limit` on bind so the cap is stable.
 
-This is **idempotent**: calling it twice with the same `imageCount` is a no-op.
+**State transitions:**
+
+| From | To | Trigger |
+|---|---|---|
+| `unused` | `active` | First successful upload to any client (`trial.service.bindTrialIfFirstUpload`, called inside the photo finalize transaction). Binds `trial_client_id` permanently. |
+| `active` | `consumed` | (a) trial cap hit on the trial client (`trial.service.consumeTrialIfLimitReached` after each upload), (b) 30-day window elapsed (`trialExpiry.worker.js`, hourly), (c) photographer pays for ANY client (`payment.service.applySideEffects` → `trial.service.consumeTrial`), or (d) the trial client is deleted (`client.service.deleteClient`). |
+| anything | `unused` | **Never.** No code path. Migration 09 ripped out the previous "refund on trial-client delete" loophole; migrations 10/11 healed leftover corrupt rows. |
+
+**[`recalculateAlbumPricing`](src/services/billing.service.js)** runs after every photo upload/delete and decides per-album pricing from current trial state:
+
+- **Trial path** (`trial_status='active'` AND `trial_client_id=album.client_id` AND not expired) → `chargeable_images=0, price=0, is_paid=true, free_consumed=imageCount`. The album is fully covered by the trial.
+- **Paid path** (everything else, including consumed/expired/other-client) → `chargeable_images=imageCount, price=calculateAlbumPrice(imageCount), is_paid=false` (or `true` only if `imageCount=0`).
+- **Entitlement lock:** if `is_paid=true AND transaction_id IS NOT NULL`, skip recalc — a real payment has already entitled this album permanently.
+
+Idempotent: rerunning produces the same result.
+
+**Upload gate** ([`trial.service.evaluateUploadGate`](src/services/trial.service.js)) runs inside the same transaction as the photo INSERT, takes `SELECT ... FOR UPDATE` on the user row, and decides one of: `paid` / `trial_active` / `trial_will_bind`. Blocks with 402 if the batch would push the trial client past `TRIAL_IMAGE_LIMIT`.
 
 #### Payment idempotency
 
@@ -531,6 +561,9 @@ async function applySideEffects(tx, client) {
     await billingRepo.unlockAlbums(albumIds, tx.id, tx.user_id, client)
   }
   await billingRepo.markFreeTrialUsed(tx.user_id, client)
+  // Paying for ANY client retires the per-client free trial — the
+  // photographer is now a paying customer. Forward-only / idempotent.
+  await trialService.consumeTrial(tx.user_id, client)
 
   // Combo: Razorpay + wallet pre-pay finalization
   const walletAmount = Number(tx.metadata?.wallet_amount || 0)

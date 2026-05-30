@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Framedrops — Complete Database Schema (Clean Install)
--- Generated: 2026-05-24 (post-trial-system, post migrations 07–10)
+-- Generated: 2026-05-24 (post-trial-system, post migrations 07–11)
 -- Run this on a FRESH database. Drops everything and recreates.
 
 -- TWO SEPARATE PAYMENT SYSTEMS:
@@ -174,11 +174,12 @@ CREATE TABLE users (
   -- Per-first-client free trial. State machine:
   --   unused → active   (on FIRST successful upload to any client; binds
   --                      the trial to that client_id permanently)
-  --   active → consumed (cap hit, 30-day window expired, OR photographer
-  --                      pays for any client)
-  --   consumed is TERMINAL. No code path resets to 'unused' — deleting
-  --   the trial client just nulls trial_client_id via the FK, leaving
-  --   trial_status='active' or 'consumed' standing forever.
+  --   active → consumed (cap hit, 30-day window expired, photographer
+  --                      pays for any client, OR the trial client is
+  --                      deleted — see client.service.deleteClient)
+  --   consumed is TERMINAL. No code path resets to 'unused'. Deleting
+  --   the trial client both consumes the trial (status → 'consumed')
+  --   AND nulls trial_client_id via the FK.
   trial_status            TEXT NOT NULL DEFAULT 'unused'
                           CHECK (trial_status IN ('unused', 'active', 'consumed')),
   trial_client_id         UUID,                                -- FK added after clients table below

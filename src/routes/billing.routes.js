@@ -10,11 +10,16 @@ const router = Router()
  * /v1/billing/status:
  *   get:
  *     tags: [Billing]
- *     summary: Per-user free-quota and chargeable totals
+ *     summary: Legacy lifetime-quota totals (kept for back-compat)
+ *     description: |
+ *       Returns the legacy 300-image lifetime-quota counters. The free-trial
+ *       system that replaced this lives at `/v1/billing/trial-status` — new
+ *       FE code should read trial state from there. These fields stay on the
+ *       response shape only so existing consumers don't break.
  *     security: [{ BearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Free quota usage and totals.
+ *         description: Legacy quota totals.
  *         content:
  *           application/json:
  *             schema:
@@ -25,16 +30,16 @@ const router = Router()
  *                     data:
  *                       type: object
  *                       properties:
- *                         freeUsed:           { type: integer, example: 250 }
- *                         freeLimit:          { type: integer, example: 300 }
+ *                         freeUsed:           { type: integer, example: 250, description: 'Legacy. See /v1/billing/trial-status for the current model.' }
+ *                         freeLimit:          { type: integer, example: 300, description: 'Legacy lifetime cap.' }
  *                         freeRemaining:      { type: integer, example: 50 }
- *                         lifetimeUploads:    { type: integer, example: 412 }
+ *                         lifetimeUploads:    { type: integer, example: 412, description: 'Monotonic upload counter.' }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  *
  * /v1/billing/pricing:
  *   get:
  *     tags: [Billing]
- *     summary: Public pricing tiers, currency, and free-tier limit
+ *     summary: Public pricing tiers + free-trial limits
  *     responses:
  *       200:
  *         description: Pricing config.
@@ -49,7 +54,7 @@ const router = Router()
  *                       type: object
  *                       properties:
  *                         currency:               { type: string, example: 'INR' }
- *                         freeLifetimeImageLimit: { type: integer, example: 300 }
+ *                         freeLifetimeImageLimit: { type: integer, example: 300, description: 'Legacy lifetime cap — kept for back-compat. See /v1/billing/trial-status.' }
  *                         tiers:
  *                           type: array
  *                           items:
