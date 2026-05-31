@@ -10,6 +10,7 @@
 
 import * as passwordAuthService from '../services/password-auth.service.js'
 import { generateCode, saveOtp, verifyOtp, sendOtpEmail } from '../utils/otp.js'
+import { normalizeEmail } from '../lib/emailValidation.js'
 import * as R from '../utils/response.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -19,7 +20,10 @@ export async function sendOtp(req, res) {
   if (!email || !EMAIL_RE.test(email)) {
     return R.badRequest(res, 'A valid email address is required')
   }
-  const normalEmail = email.toLowerCase()
+  // Key the OTP on the CANONICAL email so the code stored here matches the
+  // key signup() verifies against (both use normalizeEmail). Otherwise a
+  // gmail-alias signup would never find its own OTP.
+  const normalEmail = normalizeEmail(email)
   const code = generateCode()
   await saveOtp(normalEmail, code)
   await sendOtpEmail(normalEmail, code)

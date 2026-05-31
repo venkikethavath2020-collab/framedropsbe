@@ -21,6 +21,7 @@ import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { v4 as uuid } from 'uuid'
 import * as userRepo from '../repositories/user.repository.js'
+import { normalizeEmail, normalizePhone } from '../lib/emailValidation.js'
 import { hashPassword, comparePassword, validatePassword, generateResetToken, DUMMY_HASH } from '../utils/password.js'
 import * as emailService from '../email/email.service.js'
 import * as notificationService from './notification.service.js'
@@ -81,42 +82,67 @@ export async function signup({ email, password, name, phone_number, otp }, verif
   const passwordError = validatePassword(password)
   if (passwordError) return { error: passwordError, status: 400 }
 
-  if (phone_number && !PHONE_RE.test(String(phone_number).trim())) {
+  // Phone is now MANDATORY server-side (the FE already requires it). It is the
+  // strongest cheap per-person anchor we have until SMS-OTP lands.
+  if (!phone_number || !PHONE_RE.test(String(phone_number).trim())) {
     return { error: 'A valid phone number is required', status: 400 }
   }
   if (!otp || !/^\d{6}$/.test(otp)) {
     return { error: 'A valid 6-digit verification code is required', status: 400 }
   }
 
-  const normalEmail = email.toLowerCase()
-  const trimmedPhone = phone_number ? String(phone_number).trim() : null
+  // Display values (what the user typed) vs. canonical dedupe keys. We store
+  // both: display for login/UX, normalized for the uniqueness guard.
+  const displayEmail = email.toLowerCase()
+  const normalEmail  = normalizeEmail(email)        // collapses gmail dot/+ aliases
+  const trimmedPhone = String(phone_number).trim()
+  const normalPhone  = normalizePhone(trimmedPhone) // digits-only, country-code-prefixed
 
-  const existing = await userRepo.findIdByEmail(normalEmail)
+  if (!normalPhone) {
+    return { error: 'A valid phone number is required', status: 400 }
+  }
+
+  // Dedupe on the CANONICAL keys so user+1@gmail.com / "98765 43210" variants
+  // can't farm extra free trials. Pre-checks give a friendly message; the
+  // UNIQUE indexes (migration 13) are the race-proof backstop below.
+  const existing = await userRepo.findIdByNormalizedEmail(normalEmail)
   if (existing) {
     return { error: 'An account with this email already exists', status: 400 }
   }
 
-  if (trimmedPhone) {
-    const phoneExists = await userRepo.findByPhoneNumber(trimmedPhone)
-    if (phoneExists) {
-      return { error: 'This phone number is already registered to another account', status: 400 }
-    }
+  const phoneExists = await userRepo.findIdByNormalizedPhone(normalPhone)
+  if (phoneExists) {
+    return { error: 'This phone number is already registered to another account', status: 400 }
   }
 
   await verifyOtpFn(normalEmail, otp)
 
   const hashedPassword = await hashPassword(password)
   const id = uuid()
-  const newUser = await userRepo.createWithPassword({
-    id,
-    email: normalEmail,
-    name: (name && name.trim()) || 'Photographer',
-    password: hashedPassword,
-    phone_number: trimmedPhone,
-  })
+  let newUser
+  try {
+    newUser = await userRepo.createWithPassword({
+      id,
+      email: displayEmail,
+      name: (name && name.trim()) || 'Photographer',
+      password: hashedPassword,
+      phone_number: trimmedPhone,
+      normalized_email: normalEmail,
+      normalized_phone: normalPhone,
+    })
+  } catch (err) {
+    // 23505 = unique violation. Two requests for the same canonical
+    // email/phone raced past the pre-check; collapse to the same message.
+    if (err && err.code === '23505') {
+      return { error: 'An account with this email or phone number already exists', status: 400 }
+    }
+    throw err
+  }
 
-  // Best-effort welcome email — never block signup on a mail blip.
-  emailService.enqueueWelcome({ to: normalEmail, name: newUser.name })
+  // Best-effort welcome email — never block signup on a mail blip. Send to the
+  // address the user actually typed (displayEmail), NOT the normalized dedupe
+  // key — alias-stripping can produce a non-deliverable mailbox on some hosts.
+  emailService.enqueueWelcome({ to: displayEmail, name: newUser.name })
     .catch(err => console.error('[Auth] welcome email enqueue failed:', err.message))
 
   // Best-effort admin notification — helper swallows its own errors.

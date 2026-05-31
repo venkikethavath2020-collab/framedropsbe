@@ -137,6 +137,12 @@ $$ LANGUAGE plpgsql;
 CREATE TABLE users (
   id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email                   TEXT UNIQUE,                          -- nullable for phone-only users
+  -- Abuse-dedupe keys (migration 13). normalized_email collapses Gmail
+  -- dot/+ aliases; normalized_phone is digits-only (country code + number).
+  -- These — not the display columns above — are the free-trial alias guard.
+  -- UNIQUE partial indexes below.
+  normalized_email        TEXT,
+  normalized_phone        TEXT,
   name                    TEXT NOT NULL DEFAULT 'Photographer',
   role                    TEXT NOT NULL DEFAULT 'photographer', -- photographer | admin | super_admin
   date_of_birth           DATE,
@@ -224,6 +230,12 @@ CREATE INDEX idx_users_reset_token ON users(reset_token) WHERE reset_token IS NO
 CREATE UNIQUE INDEX idx_users_google_sub
   ON users (google_sub)
   WHERE google_sub IS NOT NULL;
+
+-- Abuse-dedupe indexes (migration 13).
+CREATE UNIQUE INDEX uq_users_normalized_email
+  ON users(normalized_email) WHERE normalized_email IS NOT NULL;
+CREATE UNIQUE INDEX uq_users_normalized_phone
+  ON users(normalized_phone) WHERE normalized_phone IS NOT NULL;
 -- Trial: one client per user. Partial unique guards against double-bind.
 CREATE UNIQUE INDEX uq_users_trial_client
   ON users(trial_client_id)
