@@ -32,6 +32,28 @@ export async function findByPhoneNumberExcluding(phoneNumber, excludeUserId) {
   return rows[0] || null
 }
 
+// ─── Abuse-dedupe finders (migration 13) ─────────────────────────────────────
+// These query the canonical (alias-collapsed) keys, NOT the display columns,
+// so user+1@gmail.com / "98765 43210" variants resolve to the existing row.
+
+export async function findIdByNormalizedEmail(normalizedEmail) {
+  const { rows } = await query('SELECT id FROM users WHERE normalized_email = $1', [normalizedEmail])
+  return rows[0] || null
+}
+
+export async function findIdByNormalizedPhone(normalizedPhone) {
+  const { rows } = await query('SELECT id FROM users WHERE normalized_phone = $1', [normalizedPhone])
+  return rows[0] || null
+}
+
+export async function findIdByNormalizedPhoneExcluding(normalizedPhone, excludeUserId) {
+  const { rows } = await query(
+    'SELECT id FROM users WHERE normalized_phone = $1 AND id != $2',
+    [normalizedPhone, excludeUserId]
+  )
+  return rows[0] || null
+}
+
 export async function create({ id, email, name, phone_number, date_of_birth, address, is_verified, onboarding_completed }) {
   const { rows } = await query(
     `INSERT INTO users (id, email, name, phone_number, date_of_birth, address, is_verified, onboarding_completed)
@@ -62,12 +84,19 @@ export async function markVerified(id) {
 
 // ─── Password auth methods ──────────────────────────────────────────────────
 
-export async function createWithPassword({ id, email, name, password, phone_number = null }) {
+export async function createWithPassword({
+  id, email, name, password, phone_number = null,
+  normalized_email = null, normalized_phone = null,
+}) {
   const { rows } = await query(
-    `INSERT INTO users (id, email, name, password, phone_number, is_verified, onboarding_completed)
-     VALUES ($1, $2, $3, $4, $5, true, true)
+    `INSERT INTO users
+        (id, email, name, password, phone_number,
+         normalized_email, normalized_phone,
+         is_verified, onboarding_completed)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, true, true)
      RETURNING *`,
-    [id, email, name, password, phone_number]
+    [id, email, name, password, phone_number,
+     normalized_email, normalized_phone]
   )
   return rows[0]
 }
@@ -156,13 +185,19 @@ export async function linkGoogleSub(id, googleSub) {
   return rows[0] || null
 }
 
-export async function createWithGoogle({ id, email, name, googleSub, avatarUrl }) {
+export async function createWithGoogle({
+  id, email, name, googleSub, avatarUrl,
+  normalized_email = null,
+}) {
   const { rows } = await query(
     `INSERT INTO users
-        (id, email, name, google_sub, auth_provider, avatar_url, is_verified, onboarding_completed)
-     VALUES ($1, $2, $3, $4, 'google', $5, true, true)
+        (id, email, name, google_sub, auth_provider, avatar_url,
+         normalized_email,
+         is_verified, onboarding_completed)
+     VALUES ($1, $2, $3, $4, 'google', $5, $6, true, true)
      RETURNING *`,
-    [id, email, name, googleSub, avatarUrl || null]
+    [id, email, name, googleSub, avatarUrl || null,
+     normalized_email]
   )
   return rows[0]
 }

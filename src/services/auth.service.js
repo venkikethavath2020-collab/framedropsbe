@@ -4,6 +4,7 @@
  */
 
 import * as userRepo from '../repositories/user.repository.js'
+import { normalizePhone } from '../lib/emailValidation.js'
 
 const PHONE_RE = /^[+]?[\d\s()-]{7,20}$/
 
@@ -96,6 +97,10 @@ export async function updateMe(userId, body = {}) {
       const v = body.phone_number == null ? null : String(body.phone_number).trim()
       if (v && !PHONE_RE.test(v)) return { error: 'Invalid phone number', status: 400 }
       updates.phone_number = v
+      // Keep the canonical dedupe key in sync so a profile phone-change can't
+      // sidestep the uniqueness guard via reformatting (and the unique index
+      // stays consistent with phone_number).
+      updates.normalized_phone = v ? normalizePhone(v) : null
     }
     if (body.date_of_birth !== undefined) {
       if (body.date_of_birth != null) {
@@ -172,11 +177,20 @@ export async function updateMe(userId, body = {}) {
     return { error: 'No valid fields to update', status: 400 }
   }
 
-  if (updates.phone_number) {
-    const phoneExists = await userRepo.findByPhoneNumberExcluding(updates.phone_number, userId)
+  if (updates.normalized_phone) {
+    const phoneExists = await userRepo.findIdByNormalizedPhoneExcluding(updates.normalized_phone, userId)
     if (phoneExists) return { error: 'This phone number is already registered to another account', status: 400 }
   }
 
-  const user = await userRepo.update(userId, updates)
+  let user
+  try {
+    user = await userRepo.update(userId, updates)
+  } catch (err) {
+    // 23505 = canonical phone raced into use by another account.
+    if (err && err.code === '23505') {
+      return { error: 'This phone number is already registered to another account', status: 400 }
+    }
+    throw err
+  }
   return { data: formatUser(user) }
 }

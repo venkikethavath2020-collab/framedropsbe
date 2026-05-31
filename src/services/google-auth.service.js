@@ -21,6 +21,7 @@
 import jwt from 'jsonwebtoken'
 import { v4 as uuid } from 'uuid'
 import * as userRepo from '../repositories/user.repository.js'
+import { normalizeEmail } from '../lib/emailValidation.js'
 import { verifyGoogleIdToken, isGoogleAuthEnabled } from '../auth/providers/google.provider.js'
 import * as emailService from '../email/email.service.js'
 import * as notificationService from './notification.service.js'
@@ -78,13 +79,21 @@ export async function loginOrSignup({ idToken }) {
     return { error: 'Your Google email address is not verified', status: 403 }
   }
 
+  // Canonical email — collapse gmail dot/+ aliases so a Google account links
+  // to (and dedupes against) the matching password account, and so two
+  // alias-variant Google sign-ins can't become two free-trial accounts.
+  const displayEmail = profile.email.toLowerCase()
+  const normalEmail  = normalizeEmail(profile.email)
+
   // 1. Existing Google-linked user → straight login.
   let user = await userRepo.findByGoogleSub(profile.sub)
   let isNew = false
 
-  // 2. No google_sub match — try linking by email if a local account exists.
+  // 2. No google_sub match — try linking by canonical email if a local
+  //    account exists (covers a prior password signup under any alias form).
   if (!user) {
-    const byEmail = await userRepo.findByEmail(profile.email)
+    const existingId = await userRepo.findIdByNormalizedEmail(normalEmail)
+    const byEmail = existingId ? await userRepo.findById(existingId.id) : null
     if (byEmail) {
       if (byEmail.is_disabled) {
         return { error: 'This account has been disabled. Contact support.', status: 403 }
@@ -96,15 +105,32 @@ export async function loginOrSignup({ idToken }) {
   // 3. Brand-new user → create passwordless Google account.
   if (!user) {
     const id = uuid()
-    user = await userRepo.createWithGoogle({
-      id,
-      email:     profile.email,
-      name:      (profile.name && profile.name.trim()) || 'Photographer',
-      googleSub: profile.sub,
-      avatarUrl: profile.picture,
-    })
-    isNew = true
+    try {
+      user = await userRepo.createWithGoogle({
+        id,
+        email:     displayEmail,
+        name:      (profile.name && profile.name.trim()) || 'Photographer',
+        googleSub: profile.sub,
+        avatarUrl: profile.picture,
+        normalized_email: normalEmail,
+      })
+      isNew = true
+    } catch (err) {
+      // 23505 = the canonical email was claimed by a racing request. Re-resolve
+      // and link instead of erroring, so the user still ends up signed in.
+      // This is a LINK, not a create — leave isNew=false (no welcome email).
+      if (err && err.code === '23505') {
+        const existingId = await userRepo.findIdByNormalizedEmail(normalEmail)
+        if (existingId) {
+          user = await userRepo.linkGoogleSub(existingId.id, profile.sub)
+        }
+      }
+      if (!user) throw err
+    }
+  }
 
+  // Welcome email + admin notify only for genuinely new accounts.
+  if (isNew) {
     // Best-effort welcome email — never block signup on a mail blip.
     emailService.enqueueWelcome({ to: user.email, name: user.name })
       .catch(err => console.error('[GoogleAuth] welcome email enqueue failed:', err.message))

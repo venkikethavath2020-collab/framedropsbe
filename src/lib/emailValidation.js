@@ -65,6 +65,33 @@ export function normalizeEmail(email) {
   return `${localNoAlias}@${domain}`
 }
 
+/**
+ * Canonicalise a phone number to a digits-only key for uniqueness dedupe.
+ *
+ * Strips spaces, dashes, parens, and the leading `+`, leaving only digits.
+ * The goal is NOT strict E.164 validity (we don't OTP-verify the number yet)
+ * — it's to collapse the obvious formatting variants of the SAME number so
+ * "98765 43210", "+91 98765 43210", and "9876543210" can't be three separate
+ * free-trial accounts.
+ *
+ * Indian-number convenience: a bare 10-digit mobile is prefixed with the
+ * default country code (91) so a user who types "9876543210" once and
+ * "+919876543210" the next time collides correctly. Numbers that already
+ * carry a country code (>10 digits) are left as-is.
+ *
+ * Returns null when there aren't enough digits to be a real phone (so we
+ * store NULL rather than a junk key that could false-collide).
+ */
+const DEFAULT_COUNTRY_CODE = process.env.DEFAULT_PHONE_COUNTRY_CODE || '91'
+
+export function normalizePhone(phone) {
+  if (typeof phone !== 'string' && typeof phone !== 'number') return null
+  const digits = String(phone).replace(/[^0-9]/g, '')
+  if (digits.length < 7) return null
+  if (digits.length === 10) return `${DEFAULT_COUNTRY_CODE}${digits}`
+  return digits
+}
+
 /** Is the domain on the disposable blocklist? Trusted providers always pass. */
 export function isDisposableEmail(email) {
   if (!isValidEmailFormat(email)) return true
