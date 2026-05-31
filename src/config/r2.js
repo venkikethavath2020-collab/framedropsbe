@@ -347,11 +347,20 @@ export async function deleteObject(key) {
 }
 
 /**
- * Thumbnail URL via Cloudflare Image Resizing. No second PUT at upload
- * time — the bytes are derived on-edge from the original. We pin the
- * transform into the URL path because each unique URL is billed once
- * and cached forever; varying transforms via query string would multiply
- * billable transformations with no win.
+ * Thumbnail URL.
+ *
+ * Historically this used Cloudflare Image Resizing
+ * (`/cdn-cgi/image/width=400,...,format=webp/<key>`), deriving the thumb
+ * on-edge from the original. That path is billed per unique transformation and
+ * the account's free tier (5,000/month) gets exhausted, after which Cloudflare
+ * returns error 9422 and every thumbnail 404s — galleries show placeholders.
+ *
+ * Uploads are already compressed in-browser (~1048px max, ~200 KB) before they
+ * reach R2, so the raw object is already a reasonable gallery image. We serve
+ * that raw object directly — no transform, no quota, no per-image billing.
+ *
+ * To re-enable edge resizing later (e.g. on a paid Cloudflare Images plan),
+ * set `R2_IMAGE_RESIZE=on`. Default is off (raw URL).
  *
  * Throws if R2_PUBLIC_HOST is unset — silently returning `https://undefined/...`
  * would persist a corrupt URL on the photos row.
@@ -365,7 +374,10 @@ export function buildThumbUrl(Key) {
     err.code = 'R2_NOT_CONFIGURED'
     throw err
   }
-  return `https://${host}/cdn-cgi/image/width=400,height=300,fit=cover,format=webp/${Key}`
+  if (process.env.R2_IMAGE_RESIZE === 'on') {
+    return `https://${host}/cdn-cgi/image/width=400,height=300,fit=cover,format=webp/${Key}`
+  }
+  return `https://${host}/${Key}`
 }
 
 /**
