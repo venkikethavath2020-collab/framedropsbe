@@ -24,8 +24,25 @@ function clampDate(v, fallback) {
   return d
 }
 
+// True for a date-only string like "2026-05-31" (no time component). The
+// Admin FE sends these; `new Date("2026-05-31")` parses to UTC *start* of the
+// day, so a naive `BETWEEN from AND to` drops every row created during the
+// last day. Detect the date-only form so we can extend `to` to end-of-day.
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+function clampEndDate(v, fallback) {
+  if (!v) return fallback
+  // For a date-only `to`, make the range inclusive of the whole day by snapping
+  // to the last millisecond of that UTC day. Full timestamps are used as-is.
+  if (typeof v === 'string' && DATE_ONLY_RE.test(v)) {
+    const d = new Date(`${v}T23:59:59.999Z`)
+    if (!Number.isNaN(d.getTime())) return d
+  }
+  return clampDate(v, fallback)
+}
+
 function defaultRange(from, to) {
-  const end = clampDate(to, new Date())
+  const end = clampEndDate(to, new Date())
   const start = clampDate(from, new Date(end.getTime() - 90 * DAY_MS))
   return { from: start, to: end }
 }
