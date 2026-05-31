@@ -5,11 +5,10 @@
  *   photographerCount    — distinct accounts that have completed signup
  *                          (excludes admins so the marketing number reflects
  *                          actual customers, not internal users).
- *   photoCount           — total selected photos across the platform.
- *                          We pick "photos selected by clients" as the metric
- *                          because it's the marketing claim on the login page;
- *                          the underlying `selected_count` column on `albums`
- *                          is already aggregated, so this is one cheap SUM.
+ *   photoCount           — total images uploaded across the platform.
+ *                          The login page shows "total images uploaded"; the
+ *                          `image_count` column on `albums` is already
+ *                          aggregated, so this is one cheap SUM.
  *   satisfactionPercent  — share of photographer-to-platform feedback rated
  *                          >= 4 out of all photographer-to-platform ratings.
  *                          Mirrors the testimonials surface (which also reads
@@ -24,7 +23,7 @@ export async function getPublicStats() {
         (SELECT COUNT(*)::int FROM users
           WHERE LOWER(COALESCE(role, 'user')) NOT IN ('admin', 'super_admin')
             AND COALESCE(is_disabled, false) = false)                     AS photographer_count,
-        (SELECT COALESCE(SUM(selected_count), 0)::int FROM albums)         AS photo_count,
+        (SELECT COALESCE(SUM(image_count), 0)::int FROM albums)            AS photo_count,
         (SELECT
            CASE
              WHEN COUNT(*) FILTER (WHERE rating IS NOT NULL) > 0
