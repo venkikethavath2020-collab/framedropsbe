@@ -31,6 +31,7 @@ const ALLOWED_MIME = new Set([
   'image/webp',
   'image/heic',
   'image/heif',
+  'application/pdf',   // server-generated signed agreement PDFs (agreement-pdf.service)
 ])
 const MAX_BYTES = (parseInt(process.env.MAX_FILE_SIZE_MB || '25', 10)) * 1024 * 1024
 const MIN_BYTES = 256 // smaller is suspicious — empty PNGs, partial PUTs, etc.

@@ -266,12 +266,16 @@ CREATE TABLE otp_codes (
   email         TEXT NOT NULL,
   code_hash     TEXT,
   attempt_count INTEGER NOT NULL DEFAULT 0,
+  -- Discriminates login/verification OTPs from agreement-acceptance OTPs so
+  -- the two never collide on the same email. See migration 14.
+  context       VARCHAR(20) NOT NULL DEFAULT 'login',
   expires_at    TIMESTAMPTZ NOT NULL,
   used          BOOLEAN NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX idx_otp_email ON otp_codes(email);
+CREATE INDEX idx_otp_email_context ON otp_codes(email, context);
 
 
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1404,6 +1408,78 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER trg_albums_auto_lock
   BEFORE UPDATE ON albums FOR EACH ROW EXECUTE FUNCTION lock_completed_album();
+
+
+-- ═══════════════════════════════════════════════════════════════════════════════
+-- AGREEMENTS (photography service agreements — see migration 14)
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE SEQUENCE IF NOT EXISTS agreement_no_seq START 1;
+
+CREATE TABLE agreements (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agreement_no       TEXT UNIQUE NOT NULL,
+  user_id            UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  client_id          UUID REFERENCES clients(id) ON DELETE SET NULL,
+  public_token       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  status             VARCHAR(20) NOT NULL DEFAULT 'draft'
+                       CHECK (status IN ('draft','sent','viewed','accepted','rejected','expired','archived')),
+  lang               VARCHAR(5) NOT NULL DEFAULT 'en' CHECK (lang IN ('en','te','hi')),
+  version            INTEGER NOT NULL DEFAULT 1,
+  customer_name      TEXT,
+  customer_email     TEXT,
+  customer_phone     VARCHAR(30),
+  event_name         TEXT,
+  event_type         VARCHAR(40),
+  event_date         DATE,
+  venue              TEXT,
+  total_amount       BIGINT NOT NULL DEFAULT 0,        -- paise
+  otp_enabled        BOOLEAN NOT NULL DEFAULT true,
+  content            JSONB NOT NULL DEFAULT '{}'::jsonb,
+  accepted_at        TIMESTAMPTZ,
+  accepted_name      TEXT,
+  accepted_ip        VARCHAR(64),
+  pdf_url            TEXT,
+  pdf_generated_at   TIMESTAMPTZ,
+  expires_at         TIMESTAMPTZ,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_agreements_user        ON agreements(user_id);
+CREATE INDEX idx_agreements_user_status ON agreements(user_id, status);
+CREATE INDEX idx_agreements_token       ON agreements(public_token);
+CREATE INDEX idx_agreements_client      ON agreements(client_id) WHERE client_id IS NOT NULL;
+CREATE INDEX idx_agreements_expiry      ON agreements(expires_at)
+  WHERE status IN ('sent','viewed') AND expires_at IS NOT NULL;
+
+CREATE TRIGGER trg_agreements_updated_at
+  BEFORE UPDATE ON agreements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE agreement_versions (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agreement_id  UUID NOT NULL REFERENCES agreements(id) ON DELETE CASCADE,
+  version       INTEGER NOT NULL,
+  total_amount  BIGINT NOT NULL DEFAULT 0,
+  content       JSONB NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (agreement_id, version)
+);
+CREATE INDEX idx_agreement_versions_agreement ON agreement_versions(agreement_id);
+
+CREATE TABLE agreement_events (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agreement_id  UUID NOT NULL REFERENCES agreements(id) ON DELETE CASCADE,
+  type          VARCHAR(30) NOT NULL
+                  CHECK (type IN (
+                    'created','sent','viewed','otp_sent','otp_verified',
+                    'accepted','rejected','pdf_generated','reminder_sent',
+                    'version_updated','expiry_extended','expired','archived'
+                  )),
+  meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_agreement_events_agreement ON agreement_events(agreement_id, created_at);
 
 
 -- ═══════════════════════════════════════════════════════════════════════════════

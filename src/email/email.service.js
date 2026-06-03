@@ -570,6 +570,77 @@ export async function sendSupportRequest({
   }
 }
 
+// ─── Agreements ─────────────────────────────────────────────────────────────
+// Lightweight inline templates (no Vue-email template files yet — the agreement
+// emails are transactional + short). Subjects/bodies are plain, brand-safe HTML.
+
+function agreementShell({ heading, intro, ctaLabel, ctaUrl, footer }) {
+  const btn = ctaUrl
+    ? `<p style="margin:24px 0"><a href="${ctaUrl}" style="background:#7c3aed;color:#fff;text-decoration:none;padding:12px 22px;border-radius:10px;font-weight:600;display:inline-block">${ctaLabel}</a></p>`
+    : ''
+  const html = `<div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:0 auto;color:#1f2937">
+    <div style="font-size:18px;font-weight:800;color:#7c3aed">FrameDrops</div>
+    <h2 style="font-size:20px;margin:18px 0 6px">${heading}</h2>
+    <p style="font-size:14px;line-height:1.6;color:#475569">${intro}</p>
+    ${btn}
+    <p style="font-size:12px;color:#94a3b8;margin-top:28px">${footer || 'This agreement was sent via FrameDrops, which acts only as a platform and is not a party to the agreement.'}</p>
+  </div>`
+  const text = `${heading}\n\n${intro.replace(/<[^>]+>/g, '')}\n${ctaUrl ? `\n${ctaLabel}: ${ctaUrl}\n` : ''}`
+  return { html, text }
+}
+
+export async function enqueueAgreementSent({ to, customerName, eventName, studioName, reviewUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: `${studioName} sent you an agreement`,
+    intro: `Hi ${customerName || 'there'}, please review the photography service agreement for <b>${eventName || 'your event'}</b> and sign it with your name and email verification.`,
+    ctaLabel: 'Review & Sign',
+    ctaUrl: reviewUrl,
+  })
+  const job = await repo.createJob({
+    type: 'agreement_sent', to_email: lower(to),
+    subject: `Review your photography agreement — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, reviewUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
+export async function enqueueAgreementReminder({ to, customerName, eventName, studioName, reviewUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: 'A quick reminder',
+    intro: `Hi ${customerName || 'there'}, your agreement for <b>${eventName || 'your event'}</b> from ${studioName} is still awaiting your signature.`,
+    ctaLabel: 'Review & Sign',
+    ctaUrl: reviewUrl,
+  })
+  const job = await repo.createJob({
+    type: 'agreement_reminder', to_email: lower(to),
+    subject: `Reminder: sign your agreement — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, reviewUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
+export async function enqueueAgreementAccepted({ to, customerName, eventName, studioName, pdfUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: 'Your agreement is confirmed',
+    intro: `Hi ${customerName || 'there'}, thank you — your agreement with ${studioName} for <b>${eventName || 'your event'}</b> has been accepted and recorded. A copy is available below.`,
+    ctaLabel: 'Download signed PDF',
+    ctaUrl: pdfUrl,
+    footer: 'Keep this for your records. FrameDrops stores agreements as a platform only and is not a party to them.',
+  })
+  const job = await repo.createJob({
+    type: 'agreement_accepted', to_email: lower(to),
+    subject: `Agreement confirmed — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, pdfUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
 // ─── Resend / Admin helpers ────────────────────────────────────────────────
 
 export async function resendJob(jobId) {
