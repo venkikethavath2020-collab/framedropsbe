@@ -109,7 +109,7 @@ export async function findByToken(token) {
   // along with how to reach them.
   const { rows } = await query(
     `SELECT a.*,
-            u.studio_name,
+            COALESCE(NULLIF(u.studio_name, ''), u.name) AS studio_name,
             u.email          AS studio_email,
             u.phone_number   AS studio_phone,
             u.address        AS studio_address,
