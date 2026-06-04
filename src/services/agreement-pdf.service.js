@@ -13,8 +13,16 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { createRequire } from 'module'
 import PDFDocument from 'pdfkit'
 import { uploadServerSide } from '../config/r2.js'
+
+// Use the SAME fontkit instance pdfkit loads (it `require()`s the CJS build).
+// An ESM `import 'fontkit'` resolves to a *different* module copy with a
+// *different* GPOSProcessor prototype, so patching that one has no effect on
+// pdfkit's renders. createRequire gives us pdfkit's exact instance.
+const require = createRequire(import.meta.url)
+const fontkit = require('fontkit')
 import {
   SERVICE_CATEGORIES, PREDEFINED_CLAUSES, FRAMEDROPS_DISCLAIMER,
   DOC_STRINGS, EVENT_TYPES, RETENTION_OPTIONS, tr,
@@ -33,6 +41,40 @@ const FONT_FILES = {
   en: { regular: 'NotoSans-Regular.ttf', bold: 'NotoSans-Bold.ttf' },
   te: { regular: 'NotoSansTelugu-Regular.ttf', bold: 'NotoSansTelugu-Bold.ttf' },
   hi: { regular: 'NotoSansDevanagari-Regular.ttf', bold: 'NotoSansDevanagari-Bold.ttf' },
+}
+
+/* ─── fontkit GPOS null-anchor patch ───────────────────────────────────────
+ * Several Noto Sans Telugu (and some Devanagari) builds ship GPOS mark-
+ * positioning subtables that reference a null anchor. fontkit's getAnchor()
+ * then does `null.xCoordinate` and throws "Cannot read properties of null
+ * (reading 'xCoordinate')", which previously crashed the whole Telugu render
+ * and forced an ugly Latin fallback (boxes/□□□ in the PDF). We can't reach the
+ * internal GPOSProcessor class from fontkit's exports, so we walk to its
+ * prototype via a one-off layout pass and null-guard getAnchor once at boot.
+ * A missing anchor degrades to a (0,0) offset — visually negligible — instead
+ * of crashing. Font-agnostic and survives `npm install` (no node_modules edit). */
+let _gposPatched = false
+function ensureFontkitPatched() {
+  if (_gposPatched) return
+  _gposPatched = true // set first: if anything below throws, we don't retry-loop
+  try {
+    const probe = path.join(FONT_DIR, FONT_FILES.te.regular)
+    if (!fs.existsSync(probe)) return
+    const f = fontkit.openSync(probe)
+    f.layout('రద్దు') // "రద్దు" — forces GPOSProcessor instantiation
+    const gpos = f._layoutEngine?.engine?.GPOSProcessor
+    if (!gpos) return
+    const proto = Object.getPrototypeOf(gpos)
+    if (proto.__fdAnchorPatched) return
+    const orig = proto.getAnchor
+    proto.getAnchor = function patchedGetAnchor(anchor) {
+      if (anchor == null) return { x: 0, y: 0 }
+      return orig.call(this, anchor)
+    }
+    proto.__fdAnchorPatched = true
+  } catch (err) {
+    console.warn(`[agreement-pdf] fontkit GPOS patch skipped: ${err.message}`)
+  }
 }
 
 let _warned = false
@@ -79,17 +121,37 @@ function retentionLabel(value, lang) {
 function clauseById(id) {
   return PREDEFINED_CLAUSES.find((c) => c.id === id)
 }
+/** Translate a milestone status (Paid/Pending/Overdue) for the document. */
+function payStatusLabel(status, S) {
+  switch (String(status || 'Pending').toLowerCase()) {
+    case 'paid': return S.statusPaid || 'Paid'
+    case 'overdue': return S.statusOverdue || 'Overdue'
+    default: return S.statusPending || 'Pending'
+  }
+}
 
 /* ─── Render ───────────────────────────────────────────────────────────── */
 /**
  * @param {object} agreement  DB row (snake_case) OR the formatted shape — we
  *                            read both content + flat fields defensively.
- * @param {string} studioName issuing studio name
+ * @param {string|object} studio  Issuing studio. Either a plain name string
+ *                            (legacy) or { name, email, phone, address, location }.
+ *                            Any missing field is simply omitted from the PDF.
  * @returns {Promise<Buffer>} the PDF bytes
  */
-export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceLatin = false) {
+export function renderAgreementPdf(agreement, studio = 'Your Studio', forceLatin = false) {
   return new Promise((resolve, reject) => {
     try {
+      ensureFontkitPatched()
+      // Normalise studio: accept a bare name (legacy callers) or a details object.
+      const studioInfo = typeof studio === 'string' ? { name: studio } : (studio || {})
+      const studioName = studioInfo.name || 'Your Studio'
+      // Contact lines shown under "Issued by" — only the ones we actually have.
+      const studioContacts = [
+        studioInfo.email,
+        studioInfo.phone,
+        [studioInfo.address, studioInfo.location].filter(Boolean).join(', ') || null,
+      ].filter((v) => v && String(v).trim())
       const lang = agreement.lang || 'en'
       const S = DOC_STRINGS[lang] || DOC_STRINGS.en
       const c = agreement.content || {}
@@ -112,10 +174,14 @@ export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceL
 
       doc.font('body').fontSize(11).fill('#C4B5FD')
         .text((S.title || 'Photography Service Agreement').toUpperCase(), L, 360)
-      doc.font('bodyBold').fontSize(26).fill('#ffffff')
-        .text(agreement.event_name || agreement.eventName || '—', L, 380, { width: W })
+      // Event title wraps (long names span 2–3 lines). Measure it, then place
+      // the "Accepted by …" line BELOW it so they never overlap.
+      const coverTitle = agreement.event_name || agreement.eventName || '—'
+      const titleY = 380
+      doc.font('bodyBold').fontSize(26).fill('#ffffff').text(coverTitle, L, titleY, { width: W })
+      const titleH = doc.heightOfString(coverTitle, { width: W })
       doc.font('body').fontSize(12).fill('#DDD6FE')
-        .text(`${S.acceptedBy} ${agreement.customer_name || agreement.customerName || '—'}`, L, 414, { width: W })
+        .text(`${S.acceptedBy} ${agreement.customer_name || agreement.customerName || '—'}`, L, titleY + titleH + 14, { width: W })
 
       const metaY = 640
       coverMeta(doc, L, metaY, S.agreementNo || 'Agreement No.', agreement.agreement_no || agreement.agreementNo || '—')
@@ -179,12 +245,20 @@ export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceL
       section(ctx, S.paymentSchedule, '#D97706')
       totalBanner(ctx, S.total, rupees(total))
       if (milestones.length) {
+        // Columns: Milestone | Amount | Due Date | Status. The % column was
+        // dropped — the due date is the operationally important field.
         table(ctx, '#D97706',
-          [{ t: S.milestone, w: 0.42 }, { t: '%', w: 0.13, align: 'right' }, { t: S.amount, w: 0.25, align: 'right' }, { t: S.dueDate, w: 0.20 }],
+          [
+            { t: S.milestone, w: 0.40 },
+            { t: S.amount, w: 0.22, align: 'right' },
+            { t: S.dueDate, w: 0.20 },
+            { t: S.status, w: 0.18 },
+          ],
           milestones.map((m) => [
-            m.name || '—', `${m.pct}%`,
+            m.name || '—',
             rupees(Math.round(((Number(m.pct) || 0) / 100) * Number(total))),
             m.due ? fmtDate(m.due) : '—',
+            payStatusLabel(m.status, S),
           ]))
       }
       ctx.cur += 12
@@ -209,9 +283,10 @@ export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceL
       section(ctx, `${S.terms} · ${allClauses.length}`, '#DB2777')
       allClauses.forEach((cl, i) => clause(ctx, i + 1, cl))
 
-      // Signatures
+      // Signatures — reserve extra height for studio contact lines so the
+      // block never splits awkwardly across a page break.
       ctx.cur += 16
-      ensure(ctx, 90)
+      ensure(ctx, 90 + studioContacts.length * 12)
       const sigY = ctx.cur
       const colW = (W - 40) / 2
       const accepted = agreement.status === 'accepted'
@@ -219,23 +294,39 @@ export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceL
       const acceptedAt = agreement.accepted_at || agreement.acceptedAt
       const custEmail = agreement.customer_email || agreement.customerEmail
 
-      // Left — customer acceptance
+      // Left — customer acceptance. Name + email WRAP (long names span 2 lines);
+      // each line advances by its measured height so nothing overlaps.
       if (accepted && acceptedName) {
         let ly = sigY
-        doc.font('bodyBold').fontSize(12).fill('#15803D').text(acceptedName, L, ly, { width: colW, lineBreak: false }); ly += 16
-        if (custEmail) { doc.font('body').fontSize(8.5).fill(SLATE).text(custEmail, L, ly, { width: colW, lineBreak: false }); ly += 12 }
+        doc.font('bodyBold').fontSize(12).fill('#15803D').text(acceptedName, L, ly, { width: colW })
+        ly += doc.heightOfString(acceptedName, { width: colW }) + 3
+        if (custEmail) {
+          doc.font('body').fontSize(8.5).fill(SLATE).text(custEmail, L, ly, { width: colW })
+          ly += doc.heightOfString(custEmail, { width: colW }) + 3
+        }
         const verified = (agreement.otp_enabled ?? agreement.otpEnabled)
           ? `${S.email} OTP ${lang === 'en' ? 'verified' : ''}`.trim() : (lang === 'en' ? 'Accepted' : '')
-        doc.font('body').fontSize(8.5).fill('#16A34A').text(`✓  ${verified}`, L, ly, { width: colW, lineBreak: false }); ly += 12
+        // Vector tick — the ✓ glyph (U+2713) is absent from the Noto Indic subsets.
+        drawCheck(doc, L, ly + 1, 7, '#16A34A')
+        doc.font('body').fontSize(8.5).fill('#16A34A').text(verified, L + 12, ly, { width: colW - 12, lineBreak: false })
+        ly += 13
         if (acceptedAt) doc.font('body').fontSize(8).fill(MUTED).text(fmtDateTime(acceptedAt), L, ly, { width: colW, lineBreak: false })
       } else {
         doc.save().moveTo(L, sigY + 18).lineTo(L + colW, sigY + 18).lineWidth(0.7).stroke('#CBD5E1').restore()
-        doc.font('body').fontSize(9).fill(MUTED).text(`${S.acceptedBy} ${agreement.customer_name || agreement.customerName || ''}`, L, sigY + 22, { width: colW, lineBreak: false })
+        doc.font('body').fontSize(9).fill(MUTED).text(`${S.acceptedBy} ${agreement.customer_name || agreement.customerName || ''}`, L, sigY + 22, { width: colW })
       }
 
-      // Right — issuing studio
-      doc.font('bodyBold').fontSize(10).fill('#1F2937').text(`${S.issuedBy} ${studioName}`, L + colW + 40, sigY, { width: colW, lineBreak: false })
-      doc.font('body').fontSize(8).fill(MUTED).text(S.photographerRole, L + colW + 40, sigY + 14, { width: colW, lineBreak: false })
+      // Right — issuing studio (name + role + any available contact details)
+      const rx = L + colW + 40
+      let ry = sigY
+      doc.font('bodyBold').fontSize(10).fill('#1F2937').text(`${S.issuedBy} ${studioName}`, rx, ry, { width: colW })
+      ry += doc.heightOfString(`${S.issuedBy} ${studioName}`, { width: colW }) + 2
+      doc.font('body').fontSize(8).fill(MUTED).text(S.photographerRole, rx, ry, { width: colW, lineBreak: false })
+      ry += 12
+      for (const line of studioContacts) {
+        doc.font('body').fontSize(8).fill(SLATE).text(line, rx, ry, { width: colW })
+        ry += doc.heightOfString(line, { width: colW }) + 2
+      }
 
       // Footer on every page (FrameDrops). Drawing text near the page bottom
       // makes pdfkit auto-add a page (overflow); neutralise it by zeroing the
@@ -264,15 +355,15 @@ export function renderAgreementPdf(agreement, studioName = 'Your Studio', forceL
 }
 
 /* ─── Generate + upload to R2 ──────────────────────────────────────────── */
-export async function generateAndStore(agreement, studioName) {
+export async function generateAndStore(agreement, studio) {
   let buffer
   try {
-    buffer = await renderAgreementPdf(agreement, studioName)
+    buffer = await renderAgreementPdf(agreement, studio)
   } catch (err) {
     // Some Noto Indic .ttf builds trip a fontkit GPOS bug. Never fail the
     // request — regenerate with the Latin font (text shows in Latin glyphs).
     console.warn(`[agreement-pdf] render failed for lang="${agreement.lang}" (${err.message}); retrying with Latin font.`)
-    buffer = await renderAgreementPdf(agreement, studioName, true)
+    buffer = await renderAgreementPdf(agreement, studio, true)
   }
   const no = (agreement.agreement_no || agreement.agreementNo || agreement.id).replace(/[^A-Za-z0-9-]/g, '')
   const key = `agreements/${agreement.user_id || agreement.userId}/${no}-v${agreement.version || 1}.pdf`
@@ -299,6 +390,18 @@ function centeredText(doc, text, x, y, h, fontSize, opts = {}) {
   doc.fontSize(fontSize).text(text, x, ty, { lineBreak: false, ...opts })
 }
 
+/** A small vector check mark — font-independent (✓ glyph is missing from the
+ *  Noto Indic subsets). `size` is the bounding box edge; (x,y) is its top-left. */
+function drawCheck(doc, x, y, size, color) {
+  doc.save()
+    .lineWidth(Math.max(1, size / 6)).lineCap('round').lineJoin('round')
+    .moveTo(x + size * 0.12, y + size * 0.55)
+    .lineTo(x + size * 0.40, y + size * 0.82)
+    .lineTo(x + size * 0.92, y + size * 0.18)
+    .stroke(color)
+    .restore()
+}
+
 function section(ctx, label, color = VIOLET) {
   const { doc, L, W } = ctx
   ensure(ctx, 30)
@@ -313,14 +416,29 @@ function section(ctx, label, color = VIOLET) {
 
 function kv(ctx, key, value, opts = {}) {
   const { doc, L, W } = ctx
-  ensure(ctx, 16)
+  // Label column (left) + value column (right). The value WRAPS — long emails,
+  // venues, and event names span multiple lines. Row height = the taller of the
+  // two columns, measured, so the next row can never overlap this one.
+  const keyW = W * 0.30
+  const valX = L + W * 0.32
+  const valW = W * 0.68
+  const valFs = opts.bold ? 11 : 9.5
+  const val = value ? String(value) : ''
+
+  doc.font('body').fontSize(9.5)
+  const keyH = doc.heightOfString(key || '', { width: keyW })
+  doc.font(opts.bold ? 'bodyBold' : 'body').fontSize(valFs)
+  const valH = val ? doc.heightOfString(val, { width: valW }) : 0
+  const rowH = Math.max(keyH, valH, 12)
+
+  ensure(ctx, rowH + 4)
   const y = ctx.cur
-  doc.font('body').fontSize(9.5).fill(MUTED).text(key || '', L, y, { width: W * 0.45, lineBreak: false })
-  if (value) {
-    doc.font(opts.bold ? 'bodyBold' : 'body').fontSize(opts.bold ? 11 : 9.5).fill(opts.valueColor || '#1F2937')
-      .text(value, L + W * 0.45, y, { width: W * 0.55, align: 'right', lineBreak: false })
+  doc.font('body').fontSize(9.5).fill(MUTED).text(key || '', L, y, { width: keyW })
+  if (val) {
+    doc.font(opts.bold ? 'bodyBold' : 'body').fontSize(valFs).fill(opts.valueColor || '#1F2937')
+      .text(val, valX, y, { width: valW, align: 'right' })
   }
-  ctx.cur = y + 14
+  ctx.cur = y + rowH + 4
 }
 
 /** Colored chips, vertically-centered text, wraps within W. */
@@ -341,32 +459,45 @@ function chips(ctx, labels, color, tint) {
   ctx.cur += h
 }
 
-/** Colored-header table. cols: [{t,w,align}]; rows: string[][]. */
+/** Colored-header table. cols: [{t,w,align}]; rows: string[][].
+ *  Each row's height is MEASURED from its tallest wrapping cell, so long
+ *  deliverable/milestone text wraps cleanly instead of overlapping the next row. */
 function table(ctx, headColor, cols, rows) {
   const { doc, L, W } = ctx
-  const hh = 19, rh = 17
-  ensure(ctx, hh + rh) // header + at least one row together
+  const hh = 19, cellFs = 8.5, padV = 5, padX = 8
+  const colX = (ci) => L + cols.slice(0, ci).reduce((s, c) => s + c.w * W, 0) + padX
+  const colInnerW = (ci) => cols[ci].w * W - padX * 2
+
   // header band
+  ensure(ctx, hh + 18)
   doc.save().roundedRect(L, ctx.cur, W, hh, 4).fill(headColor).restore()
-  let cx = L + 8
-  for (const col of cols) {
+  cols.forEach((col, ci) => {
     doc.fillColor('#ffffff').font('bodyBold')
-    centeredText(doc, (col.t || '').toUpperCase(), cx, ctx.cur, hh, 8, { width: col.w * W - 12, align: col.align || 'left' })
-    cx += col.w * W
-  }
-  ctx.cur += hh
-  rows.forEach((row, ri) => {
-    ensure(ctx, rh)
-    if (ri % 2) doc.save().rect(L, ctx.cur, W, rh).fill('#FCFCFD').restore()
-    cx = L + 8
-    row.forEach((cell, ci) => {
-      doc.fillColor('#334155').font('body')
-      centeredText(doc, cell || '', cx, ctx.cur, rh, 8.5, { width: cols[ci].w * W - 12, align: cols[ci].align || 'left' })
-      cx += cols[ci].w * W
-    })
-    doc.save().moveTo(L, ctx.cur + rh).lineTo(L + W, ctx.cur + rh).lineWidth(0.5).stroke('#F1F5F9').restore()
-    ctx.cur += rh
+    centeredText(doc, (col.t || '').toUpperCase(), colX(ci), ctx.cur, hh, 8, { width: colInnerW(ci), align: col.align || 'left' })
   })
+  ctx.cur += hh
+
+  for (const row of rows) {
+    // measure tallest cell at this width
+    doc.font('body').fontSize(cellFs)
+    let textH = cellFs
+    row.forEach((cell, ci) => {
+      const h = doc.heightOfString(String(cell || ''), { width: colInnerW(ci), align: cols[ci].align || 'left' })
+      if (h > textH) textH = h
+    })
+    const rh = textH + padV * 2
+
+    // a row should not split across pages — move whole row to next page if needed
+    ensure(ctx, rh)
+    const y = ctx.cur
+    doc.save().rect(L, y, W, rh).fill('#FCFCFD').restore() // subtle row bg (all rows, keeps columns visually aligned)
+    row.forEach((cell, ci) => {
+      doc.fillColor('#334155').font('body').fontSize(cellFs)
+        .text(String(cell || ''), colX(ci), y + padV, { width: colInnerW(ci), align: cols[ci].align || 'left' })
+    })
+    doc.save().moveTo(L, y + rh).lineTo(L + W, y + rh).lineWidth(0.5).stroke('#F1F5F9').restore()
+    ctx.cur = y + rh
+  }
   ctx.cur += 2
 }
 

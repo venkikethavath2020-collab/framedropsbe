@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS agreements (
   public_token       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
 
   status             VARCHAR(20) NOT NULL DEFAULT 'draft'
-                       CHECK (status IN ('draft','sent','viewed','accepted','rejected','expired','archived')),
+                       CHECK (status IN ('draft','sent','viewed','accepted','rejected','expired','archived','revoked')),
   lang               VARCHAR(5) NOT NULL DEFAULT 'en'
                        CHECK (lang IN ('en','te','hi')),
   version            INTEGER NOT NULL DEFAULT 1,
@@ -91,6 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_agreements_expiry
   ON agreements(expires_at)
   WHERE status IN ('sent','viewed') AND expires_at IS NOT NULL;
 
+DROP TRIGGER IF EXISTS trg_agreements_updated_at ON agreements;
 CREATE TRIGGER trg_agreements_updated_at
   BEFORE UPDATE ON agreements FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -116,7 +117,7 @@ CREATE TABLE IF NOT EXISTS agreement_events (
                   CHECK (type IN (
                     'created','sent','viewed','otp_sent','otp_verified',
                     'accepted','rejected','pdf_generated','reminder_sent',
-                    'version_updated','expiry_extended','expired','archived'
+                    'version_updated','expiry_extended','expired','archived','revoked'
                   )),
   meta          JSONB NOT NULL DEFAULT '{}'::jsonb,   -- { ip, ua, … }
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()

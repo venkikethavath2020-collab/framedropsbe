@@ -6,7 +6,7 @@
 import { Router } from 'express'
 import {
   list, getOne, getAudit, create, update, send, reminder,
-  duplicate, newVersion, archive, extendExpiry, getPdf,
+  duplicate, newVersion, archive, revoke, remove, extendExpiry, getPdf,
 } from '../controllers/agreement.controller.js'
 import { requireAuth } from '../middleware/auth.js'
 import { asyncHandler } from '../middleware/errorHandler.js'
@@ -132,6 +132,20 @@ router.post('/:id/extend-expiry', asyncHandler(extendExpiry))
  *   post: { tags: [Agreements], summary: 'Archive an agreement', security: [{ BearerAuth: [] }], parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }], responses: { 200: { description: Archived. } } }
  */
 router.post('/:id/archive', asyncHandler(archive))
+
+/**
+ * @openapi
+ * /v1/agreements/{id}/revoke:
+ *   post: { tags: [Agreements], summary: 'Revoke an agreement (invalidate the public link; keeps the row). Blocked on accepted.', security: [{ BearerAuth: [] }], parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }], requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }, responses: { 200: { description: Revoked. }, 409: { description: 'Signed agreement cannot be revoked.' } } }
+ */
+router.post('/:id/revoke', asyncHandler(revoke))
+
+/**
+ * @openapi
+ * /v1/agreements/{id}:
+ *   delete: { tags: [Agreements], summary: 'Delete an agreement permanently (cascades events + versions). Blocked on accepted.', security: [{ BearerAuth: [] }], parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }], responses: { 200: { description: Deleted. }, 409: { description: 'Signed agreement cannot be deleted.' } } }
+ */
+router.delete('/:id', asyncHandler(remove))
 
 /**
  * @openapi

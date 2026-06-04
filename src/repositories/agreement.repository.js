@@ -91,11 +91,32 @@ export async function findById(id, userId) {
   return rows[0] || null
 }
 
+/** Hard-delete an agreement (cascades to agreement_events + agreement_versions
+ *  via ON DELETE CASCADE). User-scoped. Returns true if a row was removed. */
+export async function remove(id, userId) {
+  const { rowCount } = await query(
+    'DELETE FROM agreements WHERE id = $1 AND user_id = $2',
+    [id, userId],
+  )
+  return rowCount > 0
+}
+
 /** Public read by opaque token — no user scope. Excludes nothing sensitive
  *  (the agreement is meant to be shown to the customer). */
 export async function findByToken(token) {
+  // Join the photographer's studio name + contact details so the customer-facing
+  // page + PDF can show the real brand (instead of the "Your Studio" placeholder)
+  // along with how to reach them.
   const { rows } = await query(
-    'SELECT * FROM agreements WHERE public_token = $1',
+    `SELECT a.*,
+            u.studio_name,
+            u.email          AS studio_email,
+            u.phone_number   AS studio_phone,
+            u.address        AS studio_address,
+            u.studio_location
+       FROM agreements a
+       JOIN users u ON u.id = a.user_id
+      WHERE a.public_token = $1`,
     [token],
   )
   return rows[0] || null

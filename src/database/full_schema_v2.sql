@@ -1423,7 +1423,7 @@ CREATE TABLE agreements (
   client_id          UUID REFERENCES clients(id) ON DELETE SET NULL,
   public_token       UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
   status             VARCHAR(20) NOT NULL DEFAULT 'draft'
-                       CHECK (status IN ('draft','sent','viewed','accepted','rejected','expired','archived')),
+                       CHECK (status IN ('draft','sent','viewed','accepted','rejected','expired','archived','revoked')),
   lang               VARCHAR(5) NOT NULL DEFAULT 'en' CHECK (lang IN ('en','te','hi')),
   version            INTEGER NOT NULL DEFAULT 1,
   customer_name      TEXT,
@@ -1474,7 +1474,7 @@ CREATE TABLE agreement_events (
                   CHECK (type IN (
                     'created','sent','viewed','otp_sent','otp_verified',
                     'accepted','rejected','pdf_generated','reminder_sent',
-                    'version_updated','expiry_extended','expired','archived'
+                    'version_updated','expiry_extended','expired','archived','revoked'
                   )),
   meta          JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()

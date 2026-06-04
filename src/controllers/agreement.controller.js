@@ -9,6 +9,7 @@ import * as agreementService from '../services/agreement.service.js'
 import * as repo from '../repositories/agreement.repository.js'
 import * as emailService from '../email/email.service.js'
 import { generateAndStore } from '../services/agreement-pdf.service.js'
+import { getStudioInfo } from '../services/studioInfo.service.js'
 import { query } from '../config/db.js'
 import * as R from '../utils/response.js'
 
@@ -116,6 +117,18 @@ export async function archive(req, res) {
   return R.success(res, result.data, 'Agreement archived')
 }
 
+export async function revoke(req, res) {
+  const result = await agreementService.revokeAgreement(req.user.id, req.params.id, req.body?.reason)
+  if (result.error) return R.error(res, result.error, result.status)
+  return R.success(res, result.data, 'Agreement revoked')
+}
+
+export async function remove(req, res) {
+  const result = await agreementService.deleteAgreement(req.user.id, req.params.id)
+  if (result.error) return R.error(res, result.error, result.status)
+  return R.success(res, result.data, 'Agreement deleted')
+}
+
 export async function extendExpiry(req, res) {
   const days = parseInt(req.body?.days, 10) || undefined
   const result = await agreementService.extendExpiry(req.user.id, req.params.id, days)
@@ -134,7 +147,7 @@ export async function getPdf(req, res) {
   }
   try {
     const row = await repo.findById(a.id, req.user.id)
-    const { url } = await generateAndStore(row, await studioNameFor(req.user.id))
+    const { url } = await generateAndStore(row, await getStudioInfo(req.user.id))
     await repo.update(a.id, req.user.id, { pdf_url: url, pdf_generated_at: new Date() })
     await repo.insertEvent(a.id, 'pdf_generated')
     return R.success(res, { url, generatedAt: new Date() }, 'PDF generated')

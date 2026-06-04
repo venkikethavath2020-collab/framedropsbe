@@ -40,6 +40,12 @@ export async function getByToken(token, { ip } = {}) {
   if (!UUID_RE.test(token || '')) return { error: 'Agreement not found', status: 404 }
   const row = await repo.findByToken(token)
   if (!row || row.status === 'archived') return { error: 'Agreement not found', status: 404 }
+  // Revoked: the photographer invalidated this link. Return 410 Gone with a
+  // distinct code so the public page can show a friendly "no longer valid"
+  // screen instead of a generic not-found.
+  if (row.status === 'revoked') {
+    return { error: 'This agreement link is no longer valid.', status: 410, code: 'revoked' }
+  }
 
   // First view by the customer flips sent → viewed (one-way; never downgrade).
   if (row.status === 'sent') {
@@ -63,6 +69,7 @@ export async function sendOtp(token) {
   if (!UUID_RE.test(token || '')) return { error: 'Agreement not found', status: 404 }
   const row = await repo.findByToken(token)
   if (!row) return { error: 'Agreement not found', status: 404 }
+  if (row.status === 'revoked') return { error: 'This agreement link is no longer valid.', status: 410, code: 'revoked' }
   if (row.status === 'accepted') return { error: 'This agreement was already accepted', status: 409 }
   if (row.status === 'expired') return { error: 'This agreement has expired', status: 410 }
   if (!row.otp_enabled) return { error: 'OTP verification is not enabled for this agreement', status: 400 }
@@ -95,6 +102,7 @@ export async function accept(token, { fullName, code }, { ip } = {}) {
   if (!UUID_RE.test(token || '')) return { error: 'Agreement not found', status: 404 }
   const row = await repo.findByToken(token)
   if (!row) return { error: 'Agreement not found', status: 404 }
+  if (row.status === 'revoked') return { error: 'This agreement link is no longer valid.', status: 410, code: 'revoked' }
   if (row.status === 'accepted') return { error: 'This agreement was already accepted', status: 409 }
   if (row.status === 'expired') return { error: 'This agreement has expired', status: 410 }
   if (!fullName || !String(fullName).trim()) return { error: 'Full name is required', status: 400 }
@@ -122,6 +130,7 @@ export async function reject(token, { reason } = {}) {
   if (!UUID_RE.test(token || '')) return { error: 'Agreement not found', status: 404 }
   const row = await repo.findByToken(token)
   if (!row) return { error: 'Agreement not found', status: 404 }
+  if (row.status === 'revoked') return { error: 'This agreement link is no longer valid.', status: 410, code: 'revoked' }
   if (row.status === 'accepted') return { error: 'This agreement was already accepted', status: 409 }
 
   const updated = await repo.update(row.id, row.user_id, { status: 'rejected' })

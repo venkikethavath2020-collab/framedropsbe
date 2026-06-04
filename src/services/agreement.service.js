@@ -42,7 +42,19 @@ function format(row) {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // Present only on the public (findByToken) path, which joins users.
+    studioName: row.studio_name || null,
+    studioContacts: buildStudioContacts(row),
   }
+}
+
+/** Studio contact lines for "Issued by" — email, phone, address+location.
+ *  Only non-empty values; keep in sync with FE utils/studioContacts.ts and
+ *  services/studioInfo.service.js. Returns [] when the join wasn't done. */
+function buildStudioContacts(row) {
+  const clean = (v) => (v && String(v).trim() ? String(v).trim() : null)
+  const addr = [clean(row.studio_address), clean(row.studio_location)].filter(Boolean).join(', ') || null
+  return [clean(row.studio_email), clean(row.studio_phone), addr].filter(Boolean)
 }
 
 /* ─── Validation ───────────────────────────────────────────────────────── */
@@ -71,6 +83,8 @@ function toColumns(body) {
   for (const [apiKey, col] of Object.entries(m)) {
     if (body[apiKey] !== undefined) cols[col] = body[apiKey]
   }
+  // OTP verification is mandatory — never let a client persist it as false.
+  if ('otp_enabled' in cols) cols.otp_enabled = true
   return cols
 }
 
@@ -230,6 +244,33 @@ export async function archiveAgreement(userId, id) {
   const row = await repo.update(id, userId, { status: 'archived' })
   await repo.insertEvent(id, 'archived')
   return { data: format(row) }
+}
+
+/** Revoke — invalidate the public link (e.g. sent to the wrong customer).
+ *  Keeps the row + audit trail. Signed (accepted) agreements are protected. */
+export async function revokeAgreement(userId, id, reason) {
+  const existing = await repo.findById(id, userId)
+  if (!existing) return { error: 'Agreement not found', status: 404 }
+  if (existing.status === 'accepted') {
+    return { error: 'A signed agreement cannot be revoked. Archive it instead.', status: 409 }
+  }
+  if (existing.status === 'revoked') return { data: format(existing) } // idempotent
+  const row = await repo.update(id, userId, { status: 'revoked' })
+  await repo.insertEvent(id, 'revoked', reason ? { reason: String(reason).slice(0, 500) } : {})
+  return { data: format(row) }
+}
+
+/** Hard-delete — erase the agreement entirely (cascades events + versions).
+ *  Signed (accepted) agreements are protected and cannot be deleted. */
+export async function deleteAgreement(userId, id) {
+  const existing = await repo.findById(id, userId)
+  if (!existing) return { error: 'Agreement not found', status: 404 }
+  if (existing.status === 'accepted') {
+    return { error: 'A signed agreement cannot be deleted. Archive it instead.', status: 409 }
+  }
+  const ok = await repo.remove(id, userId)
+  if (!ok) return { error: 'Agreement not found', status: 404 }
+  return { data: { id } }
 }
 
 export async function extendExpiry(userId, id, days = DEFAULT_EXPIRY_DAYS) {

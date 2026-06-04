@@ -9,16 +9,11 @@ import * as svc from '../services/agreement-otp.service.js'
 import * as repo from '../repositories/agreement.repository.js'
 import * as emailService from '../email/email.service.js'
 import { generateAndStore } from '../services/agreement-pdf.service.js'
-import { query } from '../config/db.js'
+import { getStudioInfo } from '../services/studioInfo.service.js'
 import * as R from '../utils/response.js'
 
 const clientIp = (req) =>
   (req.headers['x-forwarded-for']?.split(',')[0] || req.ip || '').slice(0, 64)
-
-async function studioNameFor(userId) {
-  const { rows } = await query('SELECT studio_name FROM users WHERE id = $1', [userId])
-  return rows[0]?.studio_name || 'Your Studio'
-}
 
 export async function getByToken(req, res) {
   const result = await svc.getByToken(req.params.token, { ip: clientIp(req) })
@@ -43,8 +38,9 @@ export async function accept(req, res) {
   // Generate + store the signed PDF, then email a copy to the customer.
   try {
     const row = await repo.findByToken(req.params.token)
-    const studioName = await studioNameFor(row.user_id)
-    const { url } = await generateAndStore(row, studioName)
+    const studio = await getStudioInfo(row.user_id)
+    const studioName = studio.name
+    const { url } = await generateAndStore(row, studio)
     await repo.update(row.id, row.user_id, { pdf_url: url, pdf_generated_at: new Date() })
     await repo.insertEvent(row.id, 'pdf_generated')
 
