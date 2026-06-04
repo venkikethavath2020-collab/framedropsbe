@@ -710,7 +710,10 @@ export async function listUnifiedTransactions({
         t.amount AS total_amount,
         0 AS platform_fee,
         t.amount AS net_amount,
-        'platform_payment'::text AS source,
+        -- Differentiate agreement credit-pack purchases from album payments.
+        CASE WHEN t.metadata->>'kind' = 'agreement_credits'
+             THEN 'agreement_credits'::text
+             ELSE 'platform_payment'::text END AS source,
         NULL::text AS reference_id,
         t.razorpay_order_id,
         t.razorpay_payment_id,

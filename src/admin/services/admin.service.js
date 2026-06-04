@@ -44,10 +44,15 @@ export async function getDashboardStats() {
         totalImages: agg.total_images,
       },
       revenue: {
-        platformPayments:     Number(agg.total_platform_revenue),
-        clientPayments:       Number(agg.total_client_payments),
-        platformFees:         Number(agg.total_platform_fees),
-        photographerEarnings: Number(agg.total_photographer_earnings),
+        platformPayments:        Number(agg.total_platform_revenue),
+        // Subset of platformPayments — broken out so agreement-credit income is visible.
+        agreementCreditRevenue:  Number(agg.total_agreement_credit_revenue),
+        clientPayments:          Number(agg.total_client_payments),
+        platformFees:            Number(agg.total_platform_fees),
+        photographerEarnings:    Number(agg.total_photographer_earnings),
+      },
+      agreements: {
+        total: Number(agg.total_agreements),
       },
       wallets: {
         totalBalance: Number(agg.total_wallet_balance),
@@ -432,17 +437,26 @@ function formatIntelligence(u, recentAlbums, recentPayments, recentWithdrawals, 
     user: {
       id: u.id, name: u.name, email: u.email, phoneNumber: u.phone_number,
       role: u.role, avatarUrl: u.avatar_url,
+      dateOfBirth: u.date_of_birth,
+      address: u.address,
+      onboardingCompleted: Boolean(u.onboarding_completed),
       isActive: u.is_active !== false && !u.is_disabled,
       isDisabled: Boolean(u.is_disabled),
       isVerified: u.is_verified,
       authProvider: u.auth_provider,
       activePlan: u.active_plan,
       planExpiresAt: u.plan_expires_at,
-      studioName: u.studio_name, studioLocation: u.studio_location,
+      studioName: u.studio_name,
+      studioLocation: u.studio_location,
+      studioBio: u.studio_bio,
+      studioExperienceYears: u.studio_experience_years == null ? null : Number(u.studio_experience_years),
+      studioCompletedEvents: u.studio_completed_events == null ? null : Number(u.studio_completed_events),
       createdAt: u.created_at, updatedAt: u.updated_at, lastLoginAt: u.last_login_at,
       lifetimeUploads: Number(u.lifetime_uploads) || 0,
       freeUsed: Number(u.free_used) || 0,
       hasUsedFreeTrial: Boolean(u.has_used_free_trial),
+      agreementCreditsUsed: Number(u.agreement_credits_used) || 0,
+      agreementCreditsPurchased: Number(u.agreement_credits_purchased) || 0,
     },
     albums: {
       total: Number(u.album_count) || 0,
@@ -523,4 +537,129 @@ export async function getUserIntelligence(userId) {
   ])
 
   return { data: formatIntelligence(user, albums, payments, withdrawals, adminActions) }
+}
+
+// ─── Agreements (read-only oversight) ────────────────────────────────────────
+
+function formatAgreement(r) {
+  return {
+    id: r.id,
+    agreementNo: r.agreement_no,
+    status: r.status,
+    version: r.version,
+    lang: r.lang,
+    customerName: r.customer_name,
+    customerEmail: r.customer_email,
+    eventName: r.event_name,
+    eventType: r.event_type,
+    eventDate: r.event_date,
+    totalAmount: Number(r.total_amount ?? 0),       // paise
+    acceptedAt: r.accepted_at ?? null,
+    pdfUrl: r.pdf_url ?? null,
+    photographerId: r.user_id,
+    photographerName: r.photographer_name,
+    photographerEmail: r.photographer_email,
+    photographerStudio: r.photographer_studio,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+export async function listAgreements(raw) {
+  const params = {
+    page:    safePage(raw.page),
+    perPage: safePerPage(raw.perPage),
+    status:  raw.status,
+    search:  raw.search,
+    userId:  UUID_RE.test(raw.userId || '') ? raw.userId : undefined,
+  }
+  try {
+    const { rows, total } = await adminRepo.listAgreements(params)
+    return {
+      data: rows.map(formatAgreement),
+      meta: { total, page: params.page, perPage: params.perPage, totalPages: Math.ceil(total / params.perPage) || 1 },
+    }
+  } catch (err) {
+    if (err?.status) return { error: err.message, status: err.status }
+    throw err
+  }
+}
+
+function formatAgreementPhotographer(r) {
+  return {
+    photographerId: r.user_id,
+    photographerName: r.photographer_name,
+    photographerEmail: r.photographer_email,
+    photographerStudio: r.photographer_studio,
+    total: r.total,
+    accepted: r.accepted,
+    pending: r.pending,
+    draft: r.draft,
+    pipelineValue: r.pipeline_value,           // paise
+    acceptanceRate: r.total > 0 ? Math.round((r.accepted / r.total) * 100) : 0,
+    lastCreatedAt: r.last_created_at,
+  }
+}
+
+/** Photographer-grouped agreement summary (default drill-down list). */
+export async function listAgreementPhotographers(raw) {
+  const params = {
+    page:    safePage(raw.page),
+    perPage: safePerPage(raw.perPage),
+    search:  raw.search,
+  }
+  const { rows, total } = await adminRepo.listAgreementPhotographers(params)
+  return {
+    data: rows.map(formatAgreementPhotographer),
+    meta: { total, page: params.page, perPage: params.perPage, totalPages: Math.ceil(total / params.perPage) || 1 },
+  }
+}
+
+export async function getAgreementDetail(id) {
+  const row = await adminRepo.getAgreementById(id)
+  if (!row) return { error: 'Agreement not found', status: 404 }
+  return {
+    data: {
+      ...formatAgreement(row),
+      venue: row.venue,
+      otpEnabled: row.otp_enabled,
+      acceptedName: row.accepted_name,
+      acceptedIp: row.accepted_ip,
+      expiresAt: row.expires_at,
+      photographerPhone: row.photographer_phone,
+      content: row.content || {},
+      events: (row.events || []).map((e) => ({ type: e.type, meta: e.meta || {}, at: e.created_at })),
+    },
+  }
+}
+
+export async function getAgreementOverview() {
+  const [metrics, timeseries, top] = await Promise.all([
+    adminRepo.getAgreementMetrics(),
+    adminRepo.getAgreementsTimeSeries(30),
+    adminRepo.getTopAgreementPhotographers(10),
+  ])
+  const sentOut = metrics.total - (metrics.byStatus.draft || 0)
+  const acceptanceRate = sentOut > 0
+    ? Math.round(((metrics.byStatus.accepted || 0) / sentOut) * 100)
+    : 0
+  return {
+    data: {
+      total: metrics.total,
+      byStatus: metrics.byStatus,
+      acceptanceRate,
+      pipelineValue: metrics.totalValue,        // paise
+      creditRevenue: metrics.creditRevenue,     // paise
+      creditPurchases: metrics.creditPurchases,
+      creditBuyers: metrics.creditBuyers,
+      timeseries,
+      topPhotographers: top.map((t) => ({
+        photographerId: t.user_id,
+        name: t.photographer_studio || t.photographer_name || '—',
+        total: t.total,
+        accepted: t.accepted,
+        pipelineValue: t.pipeline_value,
+      })),
+    },
+  }
 }
