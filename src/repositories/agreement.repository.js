@@ -260,4 +260,51 @@ export async function markExpired() {
   return rows.map((r) => r.id)
 }
 
+/* ─── Agreement credits (prepaid billing) ──────────────────────────────────
+ * remaining = FREE_LIMIT + agreement_credits_purchased − agreement_credits_used.
+ * The repo only stores the two counters; FREE_LIMIT lives in config. */
+
+/** Read a user's credit counters. */
+export async function getCreditCounters(userId, client) {
+  const exec = client || { query: (t, p) => query(t, p) }
+  const { rows } = await exec.query(
+    'SELECT agreement_credits_used, agreement_credits_purchased FROM users WHERE id = $1',
+    [userId],
+  )
+  const u = rows[0] || {}
+  return {
+    used: Number(u.agreement_credits_used || 0),
+    purchased: Number(u.agreement_credits_purchased || 0),
+  }
+}
+
+/** Atomically consume ONE credit on send, but only if the user is within their
+ *  allowance (free + purchased). `freeLimit` is passed from config. Returns the
+ *  new `used` count, or null if there was no allowance left (caller blocks). */
+export async function consumeCredit(userId, freeLimit, client) {
+  const exec = client || { query: (t, p) => query(t, p) }
+  const { rows } = await exec.query(
+    `UPDATE users
+        SET agreement_credits_used = agreement_credits_used + 1
+      WHERE id = $1
+        AND agreement_credits_used < ($2::int + agreement_credits_purchased)
+      RETURNING agreement_credits_used`,
+    [userId, freeLimit],
+  )
+  return rows[0] ? Number(rows[0].agreement_credits_used) : null
+}
+
+/** Add purchased credits (pack buy). Returns new purchased total. */
+export async function addPurchasedCredits(userId, credits, client) {
+  const exec = client || { query: (t, p) => query(t, p) }
+  const { rows } = await exec.query(
+    `UPDATE users
+        SET agreement_credits_purchased = agreement_credits_purchased + $2
+      WHERE id = $1
+      RETURNING agreement_credits_purchased`,
+    [userId, credits],
+  )
+  return rows[0] ? Number(rows[0].agreement_credits_purchased) : null
+}
+
 export { transaction }

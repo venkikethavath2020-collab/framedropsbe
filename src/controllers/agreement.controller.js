@@ -6,6 +6,7 @@
  */
 
 import * as agreementService from '../services/agreement.service.js'
+import * as creditsService from '../services/agreement-credits.service.js'
 import * as repo from '../repositories/agreement.repository.js'
 import * as emailService from '../email/email.service.js'
 import { generateAndStore } from '../services/agreement-pdf.service.js'
@@ -56,6 +57,7 @@ export async function update(req, res) {
 
 export async function send(req, res) {
   const result = await agreementService.sendAgreement(req.user.id, req.params.id)
+  // 402 = out of agreement credits → FE shows the upgrade modal (detects status 402).
   if (result.error) return R.error(res, result.error, result.status)
 
   // Enqueue the "agreement sent" email with the public review link.
@@ -155,4 +157,29 @@ export async function getPdf(req, res) {
     console.error('[agreement] PDF generation failed:', err.message)
     return R.error(res, 'Failed to generate PDF', 500)
   }
+}
+
+/* ─── Credits (prepaid billing) ────────────────────────────────────────── */
+
+export async function creditStatus(req, res) {
+  const result = await agreementService.getCreditStatus(req.user.id)
+  if (result.error) return R.error(res, result.error, result.status)
+  return R.success(res, result.data, 'Credit status')
+}
+
+export async function buyCreditsOrder(req, res) {
+  const result = await creditsService.createOrder({ userId: req.user.id, packId: req.body?.packId })
+  if (result.error) return R.error(res, result.error, result.status)
+  return R.success(res, result.data, 'Order created')
+}
+
+export async function buyCreditsVerify(req, res) {
+  const result = await creditsService.verify({
+    userId: req.user.id,
+    razorpayOrderId: req.body?.razorpayOrderId,
+    razorpayPaymentId: req.body?.razorpayPaymentId,
+    razorpaySignature: req.body?.razorpaySignature,
+  })
+  if (result.error) return R.error(res, result.error, result.status)
+  return R.success(res, result.data, 'Credits added')
 }

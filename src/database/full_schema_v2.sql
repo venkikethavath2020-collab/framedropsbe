@@ -192,6 +192,10 @@ CREATE TABLE users (
   trial_started_at        TIMESTAMPTZ,
   trial_expires_at        TIMESTAMPTZ,
   trial_image_limit       INTEGER NOT NULL DEFAULT 3000,
+  -- Agreement-feature prepaid credits (migration 16):
+  --   remaining = AGREEMENT_FREE_LIMIT + agreement_credits_purchased − agreement_credits_used
+  agreement_credits_used      INTEGER NOT NULL DEFAULT 0,  -- consumed on SEND (non-refundable)
+  agreement_credits_purchased INTEGER NOT NULL DEFAULT 0,  -- sum of bought packs (stacks)
   -- Plan / lifecycle (active_plan + plan_expires_at populated by future subscriptions work)
   active_plan             VARCHAR(40) NOT NULL DEFAULT 'free',
   plan_expires_at         TIMESTAMPTZ,
@@ -609,6 +613,7 @@ CREATE TABLE notifications (
   user_id        UUID REFERENCES users(id) ON DELETE CASCADE,
   type           VARCHAR(50) NOT NULL CHECK (type IN (
     'selection_completed', 'payment_received', 'album_expired', 'system', 'other',
+    'agreement_accepted', 'agreement_rejected',
     'withdrawal_requested', 'payment_received_admin', 'payment_failed_admin',
     'album_created_admin', 'album_deleted_admin', 'user_registered_admin',
     'feedback_submitted_admin'

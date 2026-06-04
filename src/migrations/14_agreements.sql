@@ -125,3 +125,44 @@ CREATE TABLE IF NOT EXISTS agreement_events (
 
 CREATE INDEX IF NOT EXISTS idx_agreement_events_agreement
   ON agreement_events(agreement_id, created_at);
+
+-- ─── Prepaid-credit billing (was migration 16, folded in) ───────────────────
+--   First AGREEMENT_FREE_LIMIT (default 25) agreements are free per photographer.
+--   After that they buy credit packs; purchased credits stack. 1 credit is
+--   consumed when an agreement is SENT (drafts free; revoke/delete never refund).
+--   remaining = FREE_LIMIT + agreement_credits_purchased − agreement_credits_used
+--   Pack purchases are recorded in the existing `transactions` table with
+--   metadata { kind: 'agreement_credits', packId, credits } — no new ledger table.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS agreement_credits_used      INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS agreement_credits_purchased INTEGER NOT NULL DEFAULT 0;
+
+-- Backfill: count already-SENT agreements as consumed so existing photographers
+-- don't get free retro-credits. (revoked/draft don't consume; sent/viewed/
+-- accepted/rejected/expired do.) Safe no-op on a fresh DB (no agreements yet).
+UPDATE users u
+SET agreement_credits_used = sub.cnt
+FROM (
+  SELECT user_id, COUNT(*)::int AS cnt
+    FROM agreements
+   WHERE status IN ('sent','viewed','accepted','rejected','expired')
+   GROUP BY user_id
+) sub
+WHERE u.id = sub.user_id;
+
+-- ─── In-app notification types: agreement signed / declined ─────────────────
+-- The photographer is alerted in-app (no email) when a customer accepts or
+-- rejects an agreement. Extends the notifications.type CHECK.
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
+
+ALTER TABLE notifications
+  ADD CONSTRAINT notifications_type_check
+  CHECK (type IN (
+    -- photographer (recipient_type='user')
+    'selection_completed','payment_received','album_expired','system','other',
+    'agreement_accepted','agreement_rejected',
+    -- admin (recipient_type='admin')
+    'withdrawal_requested','payment_received_admin','payment_failed_admin',
+    'album_created_admin','album_deleted_admin','user_registered_admin',
+    'feedback_submitted_admin'
+  ));

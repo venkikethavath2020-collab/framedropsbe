@@ -7,6 +7,7 @@ import { Router } from 'express'
 import {
   list, getOne, getAudit, create, update, send, reminder,
   duplicate, newVersion, archive, revoke, remove, extendExpiry, getPdf,
+  creditStatus, buyCreditsOrder, buyCreditsVerify,
 } from '../controllers/agreement.controller.js'
 import { requireAuth } from '../middleware/auth.js'
 import { asyncHandler } from '../middleware/errorHandler.js'
@@ -59,6 +60,27 @@ router.use(requireAuth)
  */
 router.get('/', asyncHandler(list))
 router.post('/', asyncHandler(create))
+
+/* ─── Credits (prepaid billing) — MUST be before /:id so 'credits' isn't
+ *     captured as an :id path segment. ─── */
+/**
+ * @openapi
+ * /v1/agreements/credits:
+ *   get: { tags: [Agreements], summary: 'Agreement credit balance (free + purchased − used) and packs', security: [{ BearerAuth: [] }], responses: { 200: { description: '{ freeLimit, used, purchased, remaining, enforced, packs }' } } }
+ */
+router.get('/credits', asyncHandler(creditStatus))
+/**
+ * @openapi
+ * /v1/agreements/credits/order:
+ *   post: { tags: [Agreements], summary: 'Create a Razorpay order to buy a credit pack', security: [{ BearerAuth: [] }], requestBody: { content: { application/json: { schema: { type: object, properties: { packId: { type: string } } } } } }, responses: { 200: { description: '{ orderId, amount, keyId, pack }' } } }
+ */
+router.post('/credits/order', asyncHandler(buyCreditsOrder))
+/**
+ * @openapi
+ * /v1/agreements/credits/verify:
+ *   post: { tags: [Agreements], summary: 'Verify a credit-pack payment and add credits', security: [{ BearerAuth: [] }], responses: { 200: { description: '{ credited, purchased }' } } }
+ */
+router.post('/credits/verify', asyncHandler(buyCreditsVerify))
 
 /**
  * @openapi

@@ -9,6 +9,9 @@
  */
 
 import * as repo from '../repositories/agreement.repository.js'
+import {
+  AGREEMENT_FREE_LIMIT, AGREEMENT_BILLING_ENFORCE, AGREEMENT_PACKS, AGREEMENT_CURRENCY,
+} from '../config/agreementPricing.js'
 
 const PER_PAGE_DEFAULT = 20
 const PER_PAGE_MAX = 100
@@ -157,7 +160,11 @@ export async function updateAgreement(userId, id, body) {
   return { data: format(row) }
 }
 
-/* ─── Send (draft → sent) — snapshots the current version ──────────────── */
+/* ─── Send (draft → sent) — snapshots the version, consumes 1 credit ────────
+ * A credit is consumed ONLY on the first draft→sent transition. Re-sending an
+ * already-sent agreement does not re-charge. When billing is enforced and the
+ * photographer is out of credits, returns 402 needs_credits (the FE shows the
+ * upgrade modal). Credit consume + status flip happen in one transaction. */
 export async function sendAgreement(userId, id) {
   const existing = await repo.findById(id, userId)
   if (!existing) return { error: 'Agreement not found', status: 404 }
@@ -165,22 +172,61 @@ export async function sendAgreement(userId, id) {
     return { error: 'Add a customer email before sending', status: 400 }
   }
 
+  // Only the first send consumes a credit. 'draft' (and re-arming a 'revoked'
+  // one if that ever happens) is the chargeable transition; already-sent/
+  // viewed/accepted/etc. are re-sends and free.
+  const isFirstSend = existing.status === 'draft'
   const expiresAt = new Date(Date.now() + DEFAULT_EXPIRY_DAYS * 86400_000)
 
-  const row = await repo.transaction(async (client) => {
-    await repo.insertVersion(client, {
-      agreement_id: id,
-      version: existing.version,
-      total_amount: existing.total_amount,
-      content: existing.content,
+  try {
+    const row = await repo.transaction(async (client) => {
+      if (isFirstSend && AGREEMENT_BILLING_ENFORCE) {
+        const newUsed = await repo.consumeCredit(userId, AGREEMENT_FREE_LIMIT, client)
+        if (newUsed === null) {
+          const err = new Error('AGREEMENT_NO_CREDITS')
+          err.code = 'needs_credits'
+          throw err
+        }
+      } else if (isFirstSend) {
+        // Enforcement off: still count usage so the meter/data stays accurate.
+        await repo.consumeCredit(userId, Number.MAX_SAFE_INTEGER, client)
+      }
+      await repo.insertVersion(client, {
+        agreement_id: id,
+        version: existing.version,
+        total_amount: existing.total_amount,
+        content: existing.content,
+      })
+      const updated = await repo.update(id, userId, { status: 'sent', expires_at: expiresAt })
+      await repo.insertEvent(id, 'sent', {}, client)
+      return updated
     })
-    const updated = await repo.update(id, userId, { status: 'sent', expires_at: expiresAt })
-    await repo.insertEvent(id, 'sent', {}, client)
-    return updated
-  })
+    // Email sending is enqueued by the controller via the email service.
+    return { data: format(row) }
+  } catch (e) {
+    if (e.code === 'needs_credits') {
+      return { error: 'You have used all your agreement credits. Buy more to keep sending.', status: 402, code: 'needs_credits' }
+    }
+    throw e
+  }
+}
 
-  // Email sending is enqueued by the controller via the email service.
-  return { data: format(row) }
+/* ─── Credit status ────────────────────────────────────────────────────────
+ * remaining = free + purchased − used (never negative). */
+export async function getCreditStatus(userId) {
+  const { used, purchased } = await repo.getCreditCounters(userId)
+  const remaining = Math.max(0, AGREEMENT_FREE_LIMIT + purchased - used)
+  return {
+    data: {
+      freeLimit: AGREEMENT_FREE_LIMIT,
+      used,
+      purchased,
+      remaining,
+      enforced: AGREEMENT_BILLING_ENFORCE,
+      currency: AGREEMENT_CURRENCY,
+      packs: AGREEMENT_PACKS, // [{ id, credits, price }]
+    },
+  }
 }
 
 /* ─── Duplicate ────────────────────────────────────────────────────────── */
