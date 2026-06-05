@@ -328,21 +328,30 @@ export function renderAgreementPdf(agreement, studio = 'Your Studio', forceLatin
         ry += doc.heightOfString(line, { width: colW }) + 2
       }
 
+      // ── Dedicated closing / thank-you page (own sheet) ──
+      // Full-bleed dark page mirroring the cover + the FE closing page. Reaches
+      // the photographer's CLIENT — a soft acquisition touchpoint. Drawn LAST so
+      // the footer loop below can exclude it (dark background, like the cover).
+      drawClosingPage(doc, S, agreement, studioName)
+
       // Footer on every page (FrameDrops). Drawing text near the page bottom
       // makes pdfkit auto-add a page (overflow); neutralise it by zeroing the
-      // bottom margin for the duration, then restore. The cover (page 0) gets
-      // no footer (dark background).
+      // bottom margin for the duration, then restore. The cover (first page) and
+      // the closing page (last) get no footer — both have dark backgrounds.
       const range = doc.bufferedPageRange()
       const savedBottom = doc.page.margins.bottom
+      const lastIndex = range.start + range.count - 1 // closing page
+      // Body pages = total minus cover minus closing page.
+      const bodyPageCount = Math.max(1, range.count - 2)
       for (let i = range.start; i < range.start + range.count; i++) {
         doc.switchToPage(i)
-        if (i === range.start) continue // skip cover
+        if (i === range.start || i === lastIndex) continue // skip cover + closing
         doc.page.margins.bottom = 0
         const fy = doc.page.height - 30
         doc.font('body').fontSize(8).fill(MUTED)
           .text(`FrameDrops · ${S.title}`, L, fy, { lineBreak: false, width: W * 0.7 })
         doc.font('body').fontSize(8).fill(MUTED)
-          .text(`${agreement.agreement_no || agreement.agreementNo || ''}  ·  Page ${i} of ${range.count - 1}`,
+          .text(`${agreement.agreement_no || agreement.agreementNo || ''}  ·  Page ${i} of ${bodyPageCount}`,
             L, fy, { width: W, align: 'right', lineBreak: false })
         doc.page.margins.bottom = savedBottom
       }
@@ -401,6 +410,7 @@ function drawCheck(doc, x, y, size, color) {
     .stroke(color)
     .restore()
 }
+
 
 function section(ctx, label, color = VIOLET) {
   const { doc, L, W } = ctx
@@ -557,6 +567,67 @@ function clause(ctx, n, cl) {
 function coverMeta(doc, x, y, label, value) {
   doc.font('body').fontSize(8).fill('#A78BDA').text((label || '').toUpperCase(), x, y, { lineBreak: false })
   doc.font('bodyBold').fontSize(11).fill('#ffffff').text(value || '—', x, y + 12, { lineBreak: false })
+}
+
+/**
+ * Dedicated closing / thank-you page. A warm note FROM THE STUDIO to the client
+ * (the signer is the photographer's customer, not a photographer — so no product
+ * pitch). FrameDrops appears only as a quiet "securely signed via" trust line.
+ * Full-bleed dark sheet matching the cover. Drawn on its own page.
+ */
+function drawClosingPage(doc, S, agreement, studioName) {
+  doc.addPage()
+  doc.page.margins.bottom = 0 // we own all placement here
+  const pageW = doc.page.width
+  const pageH = doc.page.height
+  const L = doc.page.margins.left
+  const W = pageW - doc.page.margins.left - doc.page.margins.right
+
+  // Background — gradient matching the cover (smooth, no banding).
+  try {
+    const grad = doc.linearGradient(0, 0, 0, pageH)
+    grad.stop(0, '#2D1B5E').stop(1, '#241246')
+    doc.save().rect(0, 0, pageW, pageH).fill(grad).restore()
+  } catch {
+    doc.save().rect(0, 0, pageW, pageH).fill('#241246').restore()
+  }
+
+  // Brand lockup — top shows the STUDIO (it's their thank-you to the client).
+  const initial = (studioName || 'S').trim()[0]?.toUpperCase() || 'S'
+  const topY = 70
+  doc.save().roundedRect(L, topY, 40, 40, 11).fill('#7c3aed').restore()
+  doc.font('bodyBold').fontSize(20).fill('#ffffff')
+  centeredText(doc, initial, L, topY, 40, 20, { width: 40, align: 'center' })
+  doc.font('bodyBold').fontSize(17).fill('#ffffff').text(studioName, L + 52, topY + 11, { lineBreak: false, width: W - 52 })
+
+  // Mid block — kicker, warm headline, reassurance body + note.
+  const customer = (agreement.customer_name || agreement.customerName || '').trim()
+  const headline = customer ? `${S.thankYouHeadline}, ${customer}` : `${S.thankYouHeadline}!`
+
+  let y = 250
+  doc.font('bodyBold').fontSize(11).fill('#C4B5FD')
+    .text((S.thankYouTitle || 'Thank you').toUpperCase(), L, y, { width: W, characterSpacing: 2 })
+  y += 26
+  doc.font('bodyBold').fontSize(40).fill('#ffffff').text(headline, L, y, { width: W })
+  y += doc.heightOfString(headline, { width: W }) + 16
+  const bodyW = Math.min(W, 470)
+  doc.font('body').fontSize(13).fill('#DDD6FE')
+    .text(S.thankYouBody || '', L, y, { width: bodyW, lineGap: 3 })
+  y += doc.heightOfString(S.thankYouBody || '', { width: bodyW, lineGap: 3 }) + 14
+  if (S.thankYouSigned) {
+    doc.font('body').fontSize(11).fill('#A78BDA').text(S.thankYouSigned, L, y, { width: bodyW })
+  }
+
+  // Footer row — agreement no. + a quiet "securely signed via FrameDrops".
+  const fy = pageH - 64
+  doc.save().moveTo(L, fy - 12).lineTo(L + W, fy - 12).lineWidth(0.8).strokeOpacity(0.2).stroke('#ffffff').restore()
+  doc.strokeOpacity(1)
+  doc.font('body').fontSize(9).fill('#A78BDA')
+    .text(`${agreement.agreement_no || agreement.agreementNo || ''}  ·  v${agreement.version || 1}.0`,
+      L, fy, { lineBreak: false, width: W * 0.5 })
+  doc.font('body').fontSize(9).fill('#C4B5FD')
+    .text(`${S.securelySigned || 'Securely signed & stored via'} FrameDrops`,
+      L, fy, { width: W, align: 'right', lineBreak: false })
 }
 function fmtDate(d) {
   if (!d) return '—'

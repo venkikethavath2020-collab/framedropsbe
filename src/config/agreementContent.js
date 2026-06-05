@@ -643,6 +643,11 @@ export const DOC_STRINGS = {
     on: 'on',
     version: 'Version',
     qty: 'Qty',
+    thankYouTitle: 'Thank you',
+    thankYouHeadline: 'Thank you',
+    thankYouBody: 'Your booking is confirmed and this agreement is safely recorded. We can’t wait to capture your special moments — your photographer will be in touch about the next steps.',
+    thankYouSigned: 'Keep this signed copy for your records.',
+    securelySigned: 'Securely signed & stored via',
   },
   te: {
     title: 'ఫోటోగ్రఫీ సేవా ఒప్పందం',
@@ -677,6 +682,11 @@ export const DOC_STRINGS = {
     on: 'తేదీన',
     version: 'వెర్షన్',
     qty: 'పరిమాణం',
+    thankYouTitle: 'ధన్యవాదాలు',
+    thankYouHeadline: 'ధన్యవాదాలు',
+    thankYouBody: 'మీ బుకింగ్ నిర్ధారించబడింది మరియు ఈ ఒప్పందం సురక్షితంగా నమోదు చేయబడింది. మీ ప్రత్యేక క్షణాలను చిత్రీకరించడానికి మేము ఎదురుచూస్తున్నాము — తదుపరి దశల గురించి మీ ఫోటోగ్రాఫర్ మిమ్మల్ని సంప్రదిస్తారు.',
+    thankYouSigned: 'ఈ సంతకం చేసిన కాపీని మీ రికార్డుల కోసం ఉంచుకోండి.',
+    securelySigned: 'సురక్షితంగా సంతకం & నిల్వ చేయబడింది',
   },
   hi: {
     title: 'फ़ोटोग्राफ़ी सेवा अनुबंध',
@@ -711,8 +721,15 @@ export const DOC_STRINGS = {
     on: 'को',
     version: 'संस्करण',
     qty: 'मात्रा',
+    thankYouTitle: 'धन्यवाद',
+    thankYouHeadline: 'धन्यवाद',
+    thankYouBody: 'आपकी बुकिंग पक्की हो गई है और यह अनुबंध सुरक्षित रूप से दर्ज कर लिया गया है। हम आपके ख़ास पलों को क़ैद करने के लिए उत्सुक हैं — अगले चरणों के बारे में आपके फ़ोटोग्राफ़र आपसे संपर्क करेंगे।',
+    thankYouSigned: 'इस हस्ताक्षरित प्रति को अपने रिकॉर्ड के लिए सहेज कर रखें।',
+    securelySigned: 'सुरक्षित रूप से हस्ताक्षरित और संग्रहीत',
   },
 }
+
+export const FRAMEDROPS_PROMO_URL = process.env.FRAMEDROPS_PROMO_URL || 'https://framedrops.in'
 
 /** Convenience getter for a LangMap with safe fallback to English. */
 export function tr(map, lang) {
