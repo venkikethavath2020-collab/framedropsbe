@@ -60,6 +60,7 @@ const definition = {
     { name: 'Client Auth',         description: 'Public-side access-code verification for client galleries.' },
     { name: 'Billing',             description: 'Pricing, locked-album summary, dashboard stats.' },
     { name: 'Calendar',            description: 'Photographer calendar events and notes.' },
+    { name: 'Agreements',          description: 'Photography service agreements: build, send, customer review + OTP acceptance, signed PDF.' },
     { name: 'Notifications',       description: 'In-app notifications.' },
     { name: 'Feedback',            description: 'Photographer + customer feedback submissions.' },
     { name: 'Coupons',             description: 'Coupon validation (public-facing).' },

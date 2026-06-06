@@ -570,6 +570,151 @@ export async function sendSupportRequest({
   }
 }
 
+// ─── Agreements ─────────────────────────────────────────────────────────────
+// Lightweight inline templates (no Vue-email template files yet — the agreement
+// emails are transactional + short). Subjects/bodies are plain, brand-safe HTML.
+
+/**
+ * Modern, responsive transactional shell for agreement emails. Table-based +
+ * inline styles for broad email-client support (Gmail/Outlook/Apple Mail).
+ * Optional: studioName/eventName render as a small detail card; `accent`
+ * tweaks the header gradient (violet default, green for the accepted email);
+ * `icon` is an emoji shown in the header badge.
+ */
+function agreementShell({
+  heading, intro, ctaLabel, ctaUrl, footer,
+  studioName, eventName, accent = 'violet', icon = '📄', preheader = '',
+}) {
+  const ACCENTS = {
+    violet: { from: '#7c3aed', to: '#9333ea', soft: '#F5F1FF', ink: '#6D28D9' },
+    green: { from: '#16a34a', to: '#059669', soft: '#F0FDF4', ink: '#15803D' },
+  }
+  const A = ACCENTS[accent] || ACCENTS.violet
+
+  const btn = ctaUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 8px">
+         <tr><td style="border-radius:12px;background:linear-gradient(135deg,${A.from},${A.to})">
+           <a href="${ctaUrl}" target="_blank"
+              style="display:inline-block;padding:14px 32px;font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:12px;font-family:Inter,Arial,sans-serif">
+             ${ctaLabel} &nbsp;→
+           </a>
+         </td></tr>
+       </table>`
+    : ''
+
+  const details = (studioName || eventName)
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+              style="margin:20px 0 4px;background:${A.soft};border-radius:12px">
+         <tr><td style="padding:14px 18px">
+           ${studioName ? `<div style="font-size:12px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Studio</div>
+             <div style="font-size:15px;color:#1f2937;font-weight:700;margin:2px 0 ${eventName ? '12px' : '0'}">${studioName}</div>` : ''}
+           ${eventName ? `<div style="font-size:12px;color:#94a3b8;font-weight:600;text-transform:uppercase;letter-spacing:.04em">Event</div>
+             <div style="font-size:15px;color:#1f2937;font-weight:700;margin-top:2px">${eventName}</div>` : ''}
+         </td></tr>
+       </table>`
+    : ''
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;-webkit-font-smoothing:antialiased">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0">${preheader || heading}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:32px 12px">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:540px;background:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 8px 28px rgba(16,24,40,.08)">
+        <!-- Header -->
+        <tr><td style="background:linear-gradient(135deg,${A.from},${A.to});padding:28px 32px">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td style="font-size:24px;padding-right:10px">${icon}</td>
+            <td>
+              <div style="font-size:17px;font-weight:800;color:#ffffff;font-family:Inter,Arial,sans-serif;letter-spacing:-.01em">FrameDrops</div>
+              <div style="font-size:11px;color:rgba(255,255,255,.8);font-family:Inter,Arial,sans-serif">Photography Agreements</div>
+            </td>
+          </tr></table>
+        </td></tr>
+        <!-- Body -->
+        <tr><td style="padding:34px 32px 36px;font-family:Inter,Arial,sans-serif">
+          <h1 style="font-size:21px;line-height:1.3;font-weight:800;color:#111827;margin:0 0 12px">${heading}</h1>
+          <p style="font-size:14.5px;line-height:1.7;color:#475569;margin:0">${intro}</p>
+          ${details}
+          ${btn}
+          ${ctaUrl ? `<p style="font-size:12px;color:#94a3b8;margin:14px 0 0;line-height:1.5">If the button doesn't work, copy this link:<br><a href="${ctaUrl}" style="color:${A.ink};word-break:break-all">${ctaUrl}</a></p>` : ''}
+        </td></tr>
+        <!-- Footer -->
+        <tr><td style="padding:22px 32px;background:#f8fafc;border-top:1px solid #eef2f6">
+          <p style="font-size:12px;color:#94a3b8;line-height:1.6;margin:0">${footer || 'This agreement was sent via FrameDrops, which acts only as a platform and is not a party to the agreement.'}</p>
+        </td></tr>
+      </table>
+      <p style="font-size:11px;color:#cbd5e1;font-family:Inter,Arial,sans-serif;margin:18px 0 0">© FrameDrops · This is an automated message.</p>
+    </td></tr>
+  </table>
+</body></html>`
+
+  const text = `${heading}\n\n${intro.replace(/<[^>]+>/g, '')}\n`
+    + `${studioName ? `\nStudio: ${studioName}` : ''}${eventName ? `\nEvent: ${eventName}` : ''}\n`
+    + `${ctaUrl ? `\n${ctaLabel}: ${ctaUrl}\n` : ''}`
+    + `\n${footer || 'This agreement was sent via FrameDrops, which acts only as a platform and is not a party to the agreement.'}`
+  return { html, text }
+}
+
+export async function enqueueAgreementSent({ to, customerName, eventName, studioName, reviewUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: `${studioName} sent you an agreement`,
+    intro: `Hi ${customerName || 'there'}, please review the photography service agreement for <b>${eventName || 'your event'}</b> and sign it with your name and email verification. It only takes a minute.`,
+    ctaLabel: 'Review & Sign',
+    ctaUrl: reviewUrl,
+    studioName, eventName, icon: '✍️',
+    preheader: `${studioName} has prepared your photography agreement — review & sign.`,
+  })
+  const job = await repo.createJob({
+    type: 'agreement_sent', to_email: lower(to),
+    subject: `Review your photography agreement — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, reviewUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
+export async function enqueueAgreementReminder({ to, customerName, eventName, studioName, reviewUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: 'A quick reminder',
+    intro: `Hi ${customerName || 'there'}, your agreement for <b>${eventName || 'your event'}</b> from ${studioName} is still awaiting your signature. Sign now to confirm your booking.`,
+    ctaLabel: 'Review & Sign',
+    ctaUrl: reviewUrl,
+    studioName, eventName, icon: '⏰',
+    preheader: `Your agreement from ${studioName} is still awaiting your signature.`,
+  })
+  const job = await repo.createJob({
+    type: 'agreement_reminder', to_email: lower(to),
+    subject: `Reminder: sign your agreement — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, reviewUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
+export async function enqueueAgreementAccepted({ to, customerName, eventName, studioName, pdfUrl, dbClient = null }) {
+  assertEmail(to)
+  const tpl = agreementShell({
+    heading: 'Your agreement is confirmed 🎉',
+    intro: `Hi ${customerName || 'there'}, thank you — your agreement with ${studioName} for <b>${eventName || 'your event'}</b> has been accepted and recorded. Your signed copy is ready below.`,
+    ctaLabel: 'Download signed PDF',
+    ctaUrl: pdfUrl,
+    studioName, eventName, accent: 'green', icon: '✅',
+    preheader: `Your agreement with ${studioName} is confirmed — download your signed copy.`,
+    footer: 'Keep this for your records. FrameDrops stores agreements as a platform only and is not a party to them.',
+  })
+  const job = await repo.createJob({
+    type: 'agreement_accepted', to_email: lower(to),
+    subject: `Agreement confirmed — ${eventName || studioName}`,
+    html: tpl.html, text: tpl.text, payload: { eventName, pdfUrl },
+  }, dbClient)
+  pokeWorker()
+  return { jobId: job.id }
+}
+
 // ─── Resend / Admin helpers ────────────────────────────────────────────────
 
 export async function resendJob(jobId) {

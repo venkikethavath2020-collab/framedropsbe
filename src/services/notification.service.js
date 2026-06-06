@@ -21,6 +21,8 @@ const ALLOWED_TYPES = new Set([
   'selection_completed',
   'payment_received',
   'album_expired',
+  'agreement_accepted',
+  'agreement_rejected',
   'system',
   'other',
 ])

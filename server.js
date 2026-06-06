@@ -25,6 +25,7 @@ import { startLifecycleWorker, stopLifecycleWorker } from './src/workers/lifecyc
 import { startStalePendingWorker, stopStalePendingWorker } from './src/workers/stalePending.worker.js'
 import { startCalendarReminderWorker, stopCalendarReminderWorker } from './src/workers/calendar.worker.js'
 import { startTrialExpiryWorker, stopTrialExpiryWorker } from './src/workers/trialExpiry.worker.js'
+import { startAgreementExpiryWorker, stopAgreementExpiryWorker } from './src/workers/agreementExpiry.worker.js'
 import * as R from './src/utils/response.js'
 
 import authRoutes from './src/routes/auth.routes.js'
@@ -52,6 +53,8 @@ import announcementRoutes from './src/routes/announcement.routes.js'
 import systemRoutes from './src/routes/system.routes.js'
 import { maintenanceMode } from './src/middleware/maintenance.js'
 import publicRoutes from './src/routes/public.routes.js'
+import agreementRoutes from './src/routes/agreement.routes.js'
+import publicAgreementRoutes from './src/routes/public-agreement.routes.js'
 import couponRoutes from './src/routes/coupon.routes.js'
 import emailRoutes from './src/routes/email.routes.js'
 import supportRoutes from './src/routes/support.routes.js'
@@ -288,6 +291,8 @@ app.use('/api/upload',     uploadRoutes)
 app.use('/v1/billing',        billingRoutes)
 app.use('/v1/notifications',  notificationRoutes)
 app.use('/v1/calendar',       calendarRoutes)
+app.use('/v1/agreements',     agreementRoutes)                          // photographer agreements (JWT)
+app.use('/v1/agreement',      authLimiter, publicAgreementRoutes)       // customer review/accept by opaque token (no JWT)
 app.use('/v1/client-auth',    authLimiter, clientAuthRoutes)
 app.use('/v1/payments',         paymentLimiter, paymentRoutes)          // Flow 1: photographer → platform (Razorpay)
 app.use('/v1/payments/wallet',  paymentLimiter, walletPaymentRoutes)    // Flow 1 add-on: wallet pre-payment layer
@@ -383,6 +388,7 @@ startLifecycleWorker()
 startStalePendingWorker()
 startCalendarReminderWorker()
 startTrialExpiryWorker()
+startAgreementExpiryWorker()
 
 // ─── Graceful shutdown ───────────────────────────────────────────────────────
 async function shutdown() {
@@ -394,6 +400,7 @@ async function shutdown() {
   stopStalePendingWorker()
   stopCalendarReminderWorker()
   stopTrialExpiryWorker()
+  stopAgreementExpiryWorker()
   await stopEmailWorker()
   server.close(async () => {
     await closePool()

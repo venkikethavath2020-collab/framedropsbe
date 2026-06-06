@@ -414,11 +414,11 @@ export async function getClientByShareId(shareId) {
     imageCount:    a.image_count,
     selectedCount: a.selected_count,
     shareId:       a.share_id,
-    coverUrl:      a.cover_url,
+    coverUrl:      a.cover_image,
     createdAt:     a.created_at,
   })
   // Teaser — surface just the pricing-relevant metadata (album name,
-  // image count). We hide cover_url, share_id, and selected_count so the
+  // image count). We hide cover_image, share_id, and selected_count so the
   // customer still has to pay to browse or bypass the delivery gate.
   // imageCount is kept visible so the payment dialog can render
   // "N photos across M albums" accurately.
