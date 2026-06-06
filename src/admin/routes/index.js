@@ -10,6 +10,7 @@ import dashboardRoutes from './dashboard.routes.js'
 import usersRoutes from './users.routes.js'
 import paymentsRoutes from './payments.routes.js'
 import albumsRoutes from './albums.routes.js'
+import agreementsRoutes from './agreements.routes.js'
 import walletsRoutes from './wallets.routes.js'
 import withdrawalsRoutes from './withdrawals.routes.js'
 import analyticsRoutes from './analytics.routes.js'
@@ -32,6 +33,7 @@ router.use('/dashboard',   dashboardRoutes)
 router.use('/users',       usersRoutes)
 router.use('/payments',    paymentsRoutes)
 router.use('/albums',      albumsRoutes)
+router.use('/agreements',  agreementsRoutes)
 router.use('/wallets',     walletsRoutes)
 router.use('/withdrawals', withdrawalsRoutes)
 router.use('/analytics',   analyticsRoutes)

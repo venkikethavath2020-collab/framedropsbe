@@ -46,8 +46,14 @@ export async function getDashboardAggregates() {
       (SELECT COUNT(*) FROM users WHERE is_disabled = true)::int                            AS total_disabled,
       (SELECT COUNT(*) FROM albums)::int                                                    AS total_albums,
       (SELECT COALESCE(SUM(image_count), 0) FROM albums)::int                               AS total_images,
-      -- platform revenue (Flow 1: photographer → platform)
+      -- platform revenue (Flow 1: photographer → platform) — includes album
+      -- payments AND agreement credit-pack purchases (both live in transactions)
       (SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions WHERE status = 'success')  AS total_platform_revenue,
+      -- agreement credit-pack revenue (a subset of platform revenue, broken out)
+      (SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions
+        WHERE status = 'success' AND metadata->>'kind' = 'agreement_credits')               AS total_agreement_credit_revenue,
+      -- total agreements platform-wide (adoption signal on the dashboard)
+      (SELECT COUNT(*) FROM agreements)::int                                                AS total_agreements,
       -- client payments (Flow 2: customer → photographer)
       (SELECT COALESCE(SUM(amount), 0)::bigint           FROM client_payments WHERE status = 'success') AS total_client_payments,
       (SELECT COALESCE(SUM(platform_fee), 0)::bigint     FROM client_payments WHERE status = 'success') AS total_platform_fees,
@@ -216,11 +222,14 @@ export async function getUserIntelligence(userId) {
     `SELECT
        -- Core user
        u.id, u.name, u.email, u.phone_number, u.role, u.avatar_url,
+       u.date_of_birth, u.address, u.onboarding_completed,
        u.is_disabled, u.is_active, u.is_verified, u.auth_provider,
        u.active_plan, u.plan_expires_at,
        u.created_at, u.updated_at, u.last_login_at,
        u.lifetime_uploads, u.free_used, u.has_used_free_trial,
-       u.studio_name, u.studio_location,
+       u.agreement_credits_used, u.agreement_credits_purchased,
+       u.studio_name, u.studio_location, u.studio_bio,
+       u.studio_experience_years, u.studio_completed_events,
        -- Album/photo aggregates
        (SELECT COUNT(*)::int FROM albums WHERE user_id = u.id) AS album_count,
        (SELECT COUNT(*)::int FROM albums WHERE user_id = u.id AND status = 'completed') AS completed_album_count,
@@ -634,4 +643,248 @@ export async function listAuditLog({ page = 1, perPage = 20, action, targetType,
   )
 
   return { total: Number(totalRow[0]?.total ?? 0), rows }
+}
+
+// ─── Agreements (read-only oversight) ────────────────────────────────────────
+
+const ALLOWED_AGREEMENT_STATUS = new Set([
+  'draft', 'sent', 'viewed', 'accepted', 'rejected', 'expired', 'archived', 'revoked',
+])
+
+/** Platform-wide paginated agreement list (all photographers).
+ *  Pass `userId` to scope the list to a single photographer (drill-down view). */
+export async function listAgreements({ page = 1, perPage = 20, status, search, userId }) {
+  const conditions = []
+  const params = []
+  let idx = 0
+
+  if (userId) {
+    idx++; conditions.push(`a.user_id = $${idx}`); params.push(userId)
+  }
+
+  if (status) {
+    if (!ALLOWED_AGREEMENT_STATUS.has(status)) {
+      const err = new Error(`Invalid status filter: ${status}`); err.status = 400; throw err
+    }
+    idx++; conditions.push(`a.status = $${idx}`); params.push(status)
+  }
+
+  const sanitizedSearch = sanitizeIlike(search)
+  if (sanitizedSearch) {
+    idx++
+    conditions.push(`(
+      a.agreement_no ILIKE $${idx} ESCAPE '\\'
+      OR a.customer_name ILIKE $${idx} ESCAPE '\\'
+      OR a.customer_email ILIKE $${idx} ESCAPE '\\'
+      OR a.event_name ILIKE $${idx} ESCAPE '\\'
+      OR u.name ILIKE $${idx} ESCAPE '\\'
+      OR u.studio_name ILIKE $${idx} ESCAPE '\\'
+    )`)
+    params.push(`%${sanitizedSearch}%`)
+  }
+
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const countResult = await query(
+    `SELECT COUNT(*)::int AS total FROM agreements a LEFT JOIN users u ON u.id = a.user_id ${where}`,
+    params,
+  )
+  const total = countResult.rows[0].total
+
+  idx++; params.push(perPage)
+  idx++; params.push((page - 1) * perPage)
+
+  const { rows } = await query(
+    `SELECT
+       a.id, a.agreement_no, a.status, a.version, a.lang,
+       a.customer_name, a.customer_email, a.event_name, a.event_type, a.event_date,
+       a.total_amount, a.accepted_at, a.pdf_url, a.created_at, a.updated_at,
+       a.user_id,
+       u.name AS photographer_name, u.email AS photographer_email,
+       u.studio_name AS photographer_studio
+     FROM agreements a
+     LEFT JOIN users u ON u.id = a.user_id
+     ${where}
+     ORDER BY a.created_at DESC, a.id DESC
+     LIMIT $${idx - 1} OFFSET $${idx}`,
+    params,
+  )
+  return { rows, total }
+}
+
+/**
+ * Photographer-grouped agreement summary (one row per photographer). Backs the
+ * default drill-down view so the admin sees N photographers instead of a flat
+ * 10k-row list. Searchable by photographer name / studio / email. Ordered by
+ * most-recent agreement activity so active photographers surface first.
+ */
+export async function listAgreementPhotographers({ page = 1, perPage = 20, search }) {
+  const params = []
+  let idx = 0
+  let searchFilter = ''
+
+  const sanitizedSearch = sanitizeIlike(search)
+  if (sanitizedSearch) {
+    idx++
+    searchFilter = `WHERE (
+      u.name ILIKE $${idx} ESCAPE '\\'
+      OR u.studio_name ILIKE $${idx} ESCAPE '\\'
+      OR u.email ILIKE $${idx} ESCAPE '\\'
+    )`
+    params.push(`%${sanitizedSearch}%`)
+  }
+
+  // COUNT over the grouped set = number of distinct photographers (matching search).
+  const countResult = await query(
+    `SELECT COUNT(*)::int AS total FROM (
+       SELECT a.user_id
+         FROM agreements a
+         LEFT JOIN users u ON u.id = a.user_id
+         ${searchFilter}
+        GROUP BY a.user_id
+     ) g`,
+    params,
+  )
+  const total = countResult.rows[0].total
+
+  idx++; params.push(perPage)
+  idx++; params.push((page - 1) * perPage)
+
+  const { rows } = await query(
+    `SELECT
+       a.user_id,
+       u.name        AS photographer_name,
+       u.email       AS photographer_email,
+       u.studio_name AS photographer_studio,
+       COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE a.status = 'accepted')::int AS accepted,
+       COUNT(*) FILTER (WHERE a.status IN ('sent', 'viewed'))::int AS pending,
+       COUNT(*) FILTER (WHERE a.status = 'draft')::int AS draft,
+       COALESCE(SUM(a.total_amount), 0)::bigint AS pipeline_value,
+       MAX(a.created_at) AS last_created_at
+     FROM agreements a
+     LEFT JOIN users u ON u.id = a.user_id
+     ${searchFilter}
+     GROUP BY a.user_id, u.name, u.email, u.studio_name
+     ORDER BY last_created_at DESC NULLS LAST, total DESC
+     LIMIT $${idx - 1} OFFSET $${idx}`,
+    params,
+  )
+  return { rows: rows.map((r) => ({ ...r, pipeline_value: Number(r.pipeline_value) })), total }
+}
+
+/** Single agreement with photographer + full audit trail (events). */
+export async function getAgreementById(id) {
+  const { rows } = await query(
+    `SELECT
+       a.*,
+       u.name AS photographer_name, u.email AS photographer_email,
+       u.studio_name AS photographer_studio, u.phone_number AS photographer_phone
+     FROM agreements a
+     LEFT JOIN users u ON u.id = a.user_id
+     WHERE a.id = $1`,
+    [id],
+  )
+  const agreement = rows[0]
+  if (!agreement) return null
+
+  const { rows: events } = await query(
+    `SELECT type, meta, created_at
+       FROM agreement_events
+      WHERE agreement_id = $1
+      ORDER BY created_at ASC`,
+    [id],
+  )
+  return { ...agreement, events }
+}
+
+/** Platform-wide agreement metrics: total, byStatus, pipeline value (paise),
+ *  plus credit-pack revenue (paise) from transactions. */
+export async function getAgreementMetrics() {
+  const { rows: statusRows } = await query(
+    `SELECT status, COUNT(*)::int AS count, COALESCE(SUM(total_amount), 0)::bigint AS value
+       FROM agreements GROUP BY status`,
+  )
+  const byStatus = {}
+  let total = 0
+  let totalValue = 0n
+  for (const r of statusRows) {
+    byStatus[r.status] = r.count
+    total += r.count
+    totalValue += BigInt(r.value)
+  }
+
+  const { rows: revRows } = await query(
+    `SELECT
+       COALESCE(SUM(amount), 0)::bigint AS revenue,
+       COUNT(*)::int                    AS purchases,
+       COUNT(DISTINCT user_id)::int     AS buyers
+     FROM transactions
+      WHERE status = 'success' AND metadata->>'kind' = 'agreement_credits'`,
+  )
+  return {
+    total,
+    byStatus,
+    totalValue: Number(totalValue),                 // paise
+    creditRevenue: Number(revRows[0].revenue),      // paise
+    creditPurchases: revRows[0].purchases,
+    creditBuyers: revRows[0].buyers,
+  }
+}
+
+/** Agreements created per day for the last N days (adoption-over-time). */
+export async function getAgreementsTimeSeries(days = 30) {
+  const { rows } = await query(
+    `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+            COUNT(*)::int AS count
+       FROM agreements
+      WHERE created_at >= now() - ($1 || ' days')::interval
+      GROUP BY 1
+      ORDER BY 1 ASC`,
+    [days],
+  )
+  return rows
+}
+
+/** Top photographers by agreement volume. */
+export async function getTopAgreementPhotographers(limit = 10) {
+  const { rows } = await query(
+    `SELECT a.user_id,
+            u.name AS photographer_name, u.studio_name AS photographer_studio,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE a.status = 'accepted')::int AS accepted,
+            COALESCE(SUM(a.total_amount), 0)::bigint AS pipeline_value
+       FROM agreements a
+       LEFT JOIN users u ON u.id = a.user_id
+      GROUP BY a.user_id, u.name, u.studio_name
+      ORDER BY total DESC, pipeline_value DESC
+      LIMIT $1`,
+    [limit],
+  )
+  return rows.map((r) => ({ ...r, pipeline_value: Number(r.pipeline_value) }))
+}
+
+/** Credit-pack purchases (paginated) for the admin transactions/revenue views. */
+export async function listAgreementCreditPurchases({ page = 1, perPage = 20 }) {
+  const countResult = await query(
+    `SELECT COUNT(*)::int AS total FROM transactions
+      WHERE metadata->>'kind' = 'agreement_credits'`,
+  )
+  const total = countResult.rows[0].total
+
+  const { rows } = await query(
+    `SELECT
+       t.id, t.amount, t.currency, t.status, t.created_at,
+       t.metadata->>'packId'  AS pack_id,
+       (t.metadata->>'credits')::int AS credits,
+       t.user_id,
+       u.name AS photographer_name, u.email AS photographer_email, u.studio_name AS photographer_studio
+     FROM transactions t
+     LEFT JOIN users u ON u.id = t.user_id
+     WHERE t.metadata->>'kind' = 'agreement_credits'
+     ORDER BY t.created_at DESC, t.id DESC
+     LIMIT $1 OFFSET $2`,
+    [perPage, (page - 1) * perPage],
+  )
+  return { rows, total }
 }
