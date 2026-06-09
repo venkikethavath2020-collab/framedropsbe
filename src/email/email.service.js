@@ -627,7 +627,7 @@ function agreementShell({
           <table role="presentation" cellpadding="0" cellspacing="0"><tr>
             <td style="font-size:24px;padding-right:10px">${icon}</td>
             <td>
-              <div style="font-size:17px;font-weight:800;color:#ffffff;font-family:Inter,Arial,sans-serif;letter-spacing:-.01em">FrameDrops</div>
+              <div style="font-size:17px;font-weight:800;color:#ffffff;font-family:Inter,Arial,sans-serif;letter-spacing:-.01em">Framedrops</div>
               <div style="font-size:11px;color:rgba(255,255,255,.8);font-family:Inter,Arial,sans-serif">Photography Agreements</div>
             </td>
           </tr></table>
@@ -642,10 +642,10 @@ function agreementShell({
         </td></tr>
         <!-- Footer -->
         <tr><td style="padding:22px 32px;background:#f8fafc;border-top:1px solid #eef2f6">
-          <p style="font-size:12px;color:#94a3b8;line-height:1.6;margin:0">${footer || 'This agreement was sent via FrameDrops, which acts only as a platform and is not a party to the agreement.'}</p>
+          <p style="font-size:12px;color:#94a3b8;line-height:1.6;margin:0">${footer || 'This agreement was sent via Framedrops, which acts only as a platform and is not a party to the agreement.'}</p>
         </td></tr>
       </table>
-      <p style="font-size:11px;color:#cbd5e1;font-family:Inter,Arial,sans-serif;margin:18px 0 0">© FrameDrops · This is an automated message.</p>
+      <p style="font-size:11px;color:#cbd5e1;font-family:Inter,Arial,sans-serif;margin:18px 0 0">© Framedrops · This is an automated message.</p>
     </td></tr>
   </table>
 </body></html>`
@@ -653,7 +653,7 @@ function agreementShell({
   const text = `${heading}\n\n${intro.replace(/<[^>]+>/g, '')}\n`
     + `${studioName ? `\nStudio: ${studioName}` : ''}${eventName ? `\nEvent: ${eventName}` : ''}\n`
     + `${ctaUrl ? `\n${ctaLabel}: ${ctaUrl}\n` : ''}`
-    + `\n${footer || 'This agreement was sent via FrameDrops, which acts only as a platform and is not a party to the agreement.'}`
+    + `\n${footer || 'This agreement was sent via Framedrops, which acts only as a platform and is not a party to the agreement.'}`
   return { html, text }
 }
 
@@ -704,7 +704,7 @@ export async function enqueueAgreementAccepted({ to, customerName, eventName, st
     ctaUrl: pdfUrl,
     studioName, eventName, accent: 'green', icon: '✅',
     preheader: `Your agreement with ${studioName} is confirmed — download your signed copy.`,
-    footer: 'Keep this for your records. FrameDrops stores agreements as a platform only and is not a party to them.',
+    footer: 'Keep this for your records. Framedrops stores agreements as a platform only and is not a party to them.',
   })
   const job = await repo.createJob({
     type: 'agreement_accepted', to_email: lower(to),

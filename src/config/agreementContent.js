@@ -369,17 +369,17 @@ export const PREDEFINED_CLAUSES = [
 ]
 
 /**
- * MANDATORY FrameDrops platform disclaimer — appended to the end of EVERY
- * generated agreement automatically (not toggleable). It makes clear FrameDrops
+ * MANDATORY Framedrops platform disclaimer — appended to the end of EVERY
+ * generated agreement automatically (not toggleable). It makes clear Framedrops
  * is only the tooling/storage platform and not a party to the agreement.
  */
 export const FRAMEDROPS_DISCLAIMER = {
   id: 'framedrops_disclaimer',
-  title: { en: 'FrameDrops Platform Disclaimer', te: 'FrameDrops ప్లాట్‌ఫారమ్ నిరాకరణ', hi: 'FrameDrops प्लेटफ़ॉर्म अस्वीकरण' },
+  title: { en: 'Framedrops Platform Disclaimer', te: 'Framedrops ప్లాట్‌ఫారమ్ నిరాకరణ', hi: 'Framedrops प्लेटफ़ॉर्म अस्वीकरण' },
   body: {
-    en: 'FrameDrops acts only as a technology platform that facilitates the generation, management, and storage of agreements between photographers and their customers. FrameDrops is not a legal advisor and does not provide legal advice. FrameDrops is not a party to this agreement and is not responsible for its terms, for any payment disputes, or for any service-delivery disputes. FrameDrops is not responsible for the actions, decisions, or conduct of either the photographer or the customer. All commitments, obligations, responsibilities, and liabilities arising from this agreement remain exclusively between the photographer and the customer.',
-    te: 'FrameDrops కేవలం ఫోటోగ్రాఫర్‌లు మరియు వారి కస్టమర్‌ల మధ్య ఒప్పందాల రూపకల్పన, నిర్వహణ మరియు నిల్వను సులభతరం చేసే సాంకేతిక ప్లాట్‌ఫారమ్‌గా మాత్రమే పనిచేస్తుంది. FrameDrops చట్టపరమైన సలహాదారు కాదు మరియు చట్టపరమైన సలహా ఇవ్వదు. FrameDrops ఈ ఒప్పందంలో పక్షం కాదు మరియు దాని నిబంధనలకు, ఏదైనా చెల్లింపు వివాదాలకు లేదా సేవా-డెలివరీ వివాదాలకు బాధ్యత వహించదు. ఫోటోగ్రాఫర్ లేదా కస్టమర్ చర్యలు, నిర్ణయాలు లేదా ప్రవర్తనకు FrameDrops బాధ్యత వహించదు. ఈ ఒప్పందం నుండి ఉత్పన్నమయ్యే అన్ని నిబద్ధతలు, బాధ్యతలు ఫోటోగ్రాఫర్ మరియు కస్టమర్ మధ్య మాత్రమే ఉంటాయి.',
-    hi: 'FrameDrops केवल एक तकनीकी प्लेटफ़ॉर्म के रूप में कार्य करता है जो फ़ोटोग्राफ़रों और उनके ग्राहकों के बीच अनुबंधों के निर्माण, प्रबंधन और संग्रहण को सुगम बनाता है। FrameDrops कानूनी सलाहकार नहीं है और कानूनी सलाह नहीं देता। FrameDrops इस अनुबंध का पक्ष नहीं है और इसकी शर्तों, किसी भी भुगतान विवाद, या किसी भी सेवा-वितरण विवाद के लिए ज़िम्मेदार नहीं है। FrameDrops फ़ोटोग्राफ़र या ग्राहक के कार्यों, निर्णयों या आचरण के लिए ज़िम्मेदार नहीं है। इस अनुबंध से उत्पन्न सभी प्रतिबद्धताएँ, दायित्व और ज़िम्मेदारियाँ केवल फ़ोटोग्राफ़र और ग्राहक के बीच रहती हैं।',
+    en: 'Framedrops acts only as a technology platform that facilitates the generation, management, and storage of agreements between photographers and their customers. Framedrops is not a legal advisor and does not provide legal advice. Framedrops is not a party to this agreement and is not responsible for its terms, for any payment disputes, or for any service-delivery disputes. Framedrops is not responsible for the actions, decisions, or conduct of either the photographer or the customer. All commitments, obligations, responsibilities, and liabilities arising from this agreement remain exclusively between the photographer and the customer.',
+    te: 'Framedrops కేవలం ఫోటోగ్రాఫర్‌లు మరియు వారి కస్టమర్‌ల మధ్య ఒప్పందాల రూపకల్పన, నిర్వహణ మరియు నిల్వను సులభతరం చేసే సాంకేతిక ప్లాట్‌ఫారమ్‌గా మాత్రమే పనిచేస్తుంది. Framedrops చట్టపరమైన సలహాదారు కాదు మరియు చట్టపరమైన సలహా ఇవ్వదు. Framedrops ఈ ఒప్పందంలో పక్షం కాదు మరియు దాని నిబంధనలకు, ఏదైనా చెల్లింపు వివాదాలకు లేదా సేవా-డెలివరీ వివాదాలకు బాధ్యత వహించదు. ఫోటోగ్రాఫర్ లేదా కస్టమర్ చర్యలు, నిర్ణయాలు లేదా ప్రవర్తనకు Framedrops బాధ్యత వహించదు. ఈ ఒప్పందం నుండి ఉత్పన్నమయ్యే అన్ని నిబద్ధతలు, బాధ్యతలు ఫోటోగ్రాఫర్ మరియు కస్టమర్ మధ్య మాత్రమే ఉంటాయి.',
+    hi: 'Framedrops केवल एक तकनीकी प्लेटफ़ॉर्म के रूप में कार्य करता है जो फ़ोटोग्राफ़रों और उनके ग्राहकों के बीच अनुबंधों के निर्माण, प्रबंधन और संग्रहण को सुगम बनाता है। Framedrops कानूनी सलाहकार नहीं है और कानूनी सलाह नहीं देता। Framedrops इस अनुबंध का पक्ष नहीं है और इसकी शर्तों, किसी भी भुगतान विवाद, या किसी भी सेवा-वितरण विवाद के लिए ज़िम्मेदार नहीं है। Framedrops फ़ोटोग्राफ़र या ग्राहक के कार्यों, निर्णयों या आचरण के लिए ज़िम्मेदार नहीं है। इस अनुबंध से उत्पन्न सभी प्रतिबद्धताएँ, दायित्व और ज़िम्मेदारियाँ केवल फ़ोटोग्राफ़र और ग्राहक के बीच रहती हैं।',
   },
 }
 
