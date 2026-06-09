@@ -1,6 +1,6 @@
 # Load tests
 
-Single-purpose load tests for FrameDrops, written in [k6](https://k6.io/).
+Single-purpose load tests for Framedrops, written in [k6](https://k6.io/).
 
 > **Never point these at production.** The scripts refuse to run against `framedrops.in` (only `staging.framedrops.in` and `localhost`).
 
