@@ -1,5 +1,5 @@
 /**
- * FrameDrops billing-endpoint stress test.
+ * Framedrops billing-endpoint stress test.
  *
  * The general baseline test (photographer-baseline.js) often skips the
  * billing endpoint when the test photographer has no clients yet. This

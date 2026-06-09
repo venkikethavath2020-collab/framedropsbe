@@ -1,5 +1,5 @@
 /**
- * FrameDrops baseline load test — simulates a typical photographer mix
+ * Framedrops baseline load test — simulates a typical photographer mix
  * against a running backend (local or staging only).
  *
  * Run:
