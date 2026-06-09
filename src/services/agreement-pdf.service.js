@@ -2,7 +2,7 @@
  * Agreement PDF service — renders a signed agreement to a PDF with pdfkit and
  * uploads it to R2. Mirrors the on-screen document (../framedrops
  * AgreementPdfDocument.vue): premium cover page, colored sections, full clause
- * bodies incl. the mandatory FrameDrops disclaimer, and the signature block.
+ * bodies incl. the mandatory Framedrops disclaimer, and the signature block.
  *
  * Indic scripts: Telugu/Hindi need Noto fonts embedded or they box-out. Fonts
  * live in src/assets/fonts/ (see README there) and load per-language. If a
@@ -170,7 +170,7 @@ export function renderAgreementPdf(agreement, studio = 'Your Studio', forceLatin
       // ── Cover page ──
       doc.rect(0, 0, doc.page.width, doc.page.height).fill('#241246')
       doc.fill('#ffffff').font('bodyBold').fontSize(13).text(studioName, L, 70)
-      doc.font('body').fontSize(9).fill('#C4B5FD').text('powered by FrameDrops', L, 90)
+      doc.font('body').fontSize(9).fill('#C4B5FD').text('powered by Framedrops', L, 90)
 
       doc.font('body').fontSize(11).fill('#C4B5FD')
         .text((S.title || 'Photography Service Agreement').toUpperCase(), L, 360)
@@ -334,7 +334,7 @@ export function renderAgreementPdf(agreement, studio = 'Your Studio', forceLatin
       // the footer loop below can exclude it (dark background, like the cover).
       drawClosingPage(doc, S, agreement, studioName)
 
-      // Footer on every page (FrameDrops). Drawing text near the page bottom
+      // Footer on every page (Framedrops). Drawing text near the page bottom
       // makes pdfkit auto-add a page (overflow); neutralise it by zeroing the
       // bottom margin for the duration, then restore. The cover (first page) and
       // the closing page (last) get no footer — both have dark backgrounds.
@@ -349,7 +349,7 @@ export function renderAgreementPdf(agreement, studio = 'Your Studio', forceLatin
         doc.page.margins.bottom = 0
         const fy = doc.page.height - 30
         doc.font('body').fontSize(8).fill(MUTED)
-          .text(`FrameDrops · ${S.title}`, L, fy, { lineBreak: false, width: W * 0.7 })
+          .text(`Framedrops · ${S.title}`, L, fy, { lineBreak: false, width: W * 0.7 })
         doc.font('body').fontSize(8).fill(MUTED)
           .text(`${agreement.agreement_no || agreement.agreementNo || ''}  ·  Page ${i} of ${bodyPageCount}`,
             L, fy, { width: W, align: 'right', lineBreak: false })
@@ -572,7 +572,7 @@ function coverMeta(doc, x, y, label, value) {
 /**
  * Dedicated closing / thank-you page. A warm note FROM THE STUDIO to the client
  * (the signer is the photographer's customer, not a photographer — so no product
- * pitch). FrameDrops appears only as a quiet "securely signed via" trust line.
+ * pitch). Framedrops appears only as a quiet "securely signed via" trust line.
  * Full-bleed dark sheet matching the cover. Drawn on its own page.
  */
 function drawClosingPage(doc, S, agreement, studioName) {
@@ -618,7 +618,7 @@ function drawClosingPage(doc, S, agreement, studioName) {
     doc.font('body').fontSize(11).fill('#A78BDA').text(S.thankYouSigned, L, y, { width: bodyW })
   }
 
-  // Footer row — agreement no. + a quiet "securely signed via FrameDrops".
+  // Footer row — agreement no. + a quiet "securely signed via Framedrops".
   const fy = pageH - 64
   doc.save().moveTo(L, fy - 12).lineTo(L + W, fy - 12).lineWidth(0.8).strokeOpacity(0.2).stroke('#ffffff').restore()
   doc.strokeOpacity(1)
@@ -626,7 +626,7 @@ function drawClosingPage(doc, S, agreement, studioName) {
     .text(`${agreement.agreement_no || agreement.agreementNo || ''}  ·  v${agreement.version || 1}.0`,
       L, fy, { lineBreak: false, width: W * 0.5 })
   doc.font('body').fontSize(9).fill('#C4B5FD')
-    .text(`${S.securelySigned || 'Securely signed & stored via'} FrameDrops`,
+    .text(`${S.securelySigned || 'Securely signed & stored via'} Framedrops`,
       L, fy, { width: W, align: 'right', lineBreak: false })
 }
 function fmtDate(d) {
