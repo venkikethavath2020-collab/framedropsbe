@@ -70,7 +70,7 @@ function plainTextForVariant(variant, props) {
     case 'first_album_unshared':
       return `Hi ${props.firstName},\n\nYou've uploaded photos but haven't generated a share link yet${props.albumName ? ` (album: "${props.albumName}")` : ''}. Until that link exists, your client can't see the gallery.\n\nOpen clients: ${cta.url}${sig}`
     case 'quota_80_pct':
-      return `Hi ${props.firstName},\n\nYou've used ${props.freeUsed} of your ${props.freeLimit} free images. New albums after this will move to per-album pricing — starting at ₹149.\n\nSee pricing: ${cta.url}${sig}`
+      return `Hi ${props.firstName},\n\nYou've used ${props.freeUsed} of your ${props.freeLimit} free images. New albums after this will move to per-album pricing — starting at ₹49.\n\nSee pricing: ${cta.url}${sig}`
     case 'inactive_30d':
       return `Hi ${props.firstName},\n\nIt's been ${props.daysSinceLogin} days since your last sign-in. Your albums and clients are still here, ready to go.\n\nIf something pushed you away, reply to this email and tell us — we answer within hours.\n\nOpen dashboard: ${cta.url}${sig}`
     case 'album_expired_archive':

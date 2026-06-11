@@ -8,6 +8,7 @@
  */
 
 import { query } from '../config/db.js'
+import { TRIAL_DURATION_DAYS } from '../config/pricing.js'
 
 // ─── Reads ──────────────────────────────────────────────────────────────────
 
@@ -75,17 +76,20 @@ export async function sumImagesForClient(clientId, client) {
  * snapshots the image limit so the cap is stable.
  */
 export async function bindTrialToClient(userId, clientId, client) {
+  // Trial window length is config-driven (TRIAL_DURATION_DAYS, env-overridable).
+  // Bound as an integer day-count multiplied by a 1-day interval so the value
+  // is parameterized (no SQL string interpolation).
   const userUpdate = await client.query(
     `UPDATE users
         SET trial_status     = 'active',
             trial_client_id  = $2,
             trial_started_at = NOW(),
-            trial_expires_at = NOW() + INTERVAL '30 days'
+            trial_expires_at = NOW() + ($3 * INTERVAL '1 day')
       WHERE id = $1
         AND trial_status = 'unused'
         AND trial_client_id IS NULL
       RETURNING trial_image_limit`,
-    [userId, clientId]
+    [userId, clientId, TRIAL_DURATION_DAYS]
   )
   if (userUpdate.rowCount === 0) return { bound: false }
 

@@ -6,7 +6,7 @@
 -- TWO SEPARATE PAYMENT SYSTEMS:
 --
 --   FLOW 1 — Photographer pays Platform (batch album downloads)
---     - Per-first-client FREE TRIAL: 3,000 photos / 30 days, bound on
+--     - Per-first-client FREE TRIAL: 3,000 photos / 15 days, bound on
 --       the photographer's FIRST successful upload to any client.
 --       Once consumed (cap, expiry, OR payment), every future client
 --       is billable from album one. The trial is PERMANENTLY BOUND —

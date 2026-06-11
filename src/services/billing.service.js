@@ -17,8 +17,11 @@ import {
   FREE_LIFETIME_IMAGE_LIMIT,
   CLIENT_MAX_IMAGES,
   CURRENCY,
+  TRIAL_DURATION_DAYS,
+  TRIAL_IMAGE_LIMIT,
   calculateAlbumPrice,
   getPricingTiers,
+  getLaunchInfo,
 } from '../config/pricing.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -84,6 +87,11 @@ export function getPricingInfo() {
     currency: CURRENCY,
     freeTier: { images: FREE_LIFETIME_IMAGE_LIMIT },
     clientMaxImages: CLIENT_MAX_IMAGES,
+    // Per-first-client free-trial limits (source of truth for the FE display).
+    trialDurationDays: TRIAL_DURATION_DAYS,
+    trialImageLimit: TRIAL_IMAGE_LIMIT,
+    // Launch / strike-through pricing, one strike per tier (0 = hide).
+    launch: getLaunchInfo(),
   }
 }
 

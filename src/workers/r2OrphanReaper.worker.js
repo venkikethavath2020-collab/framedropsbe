@@ -13,7 +13,7 @@
  * point where Class A list operations start to dominate cost.
  *
  * Scope: only scans albums whose updated_at is older than 7 days AND
- * either never cleaned OR cleaned more than 30 days ago. We do NOT list
+ * either never cleaned OR cleaned more than 15 days ago. We do NOT list
  * the entire bucket — Class A on List is the same price as Get, so a
  * full scan would be expensive at scale. The 7-day floor also guarantees
  * we never delete an in-flight upload (presign TTL is 5 min, retries are
