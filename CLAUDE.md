@@ -13,7 +13,7 @@
 - Photographer onboarding, authentication (JWT, OTP, Google), client/album/photo CRUD
 - Cloudinary direct-upload signing (server signs, browser uploads — bytes never hit this server)
 - Two independent payment flows on Razorpay (INR):
-  - **Flow 1 — Photographer → Platform** (`/v1/payments`): photographer pays per album. Each photographer gets a one-time per-first-client free trial (3,000 photos / 30 days, bound on first successful upload, terminal once consumed). See `src/services/trial.service.js`.
+  - **Flow 1 — Photographer → Platform** (`/v1/payments`): photographer pays per album. Each photographer gets a one-time per-first-client free trial (3,000 photos / 15 days, bound on first successful upload, terminal once consumed). See `src/services/trial.service.js`.
   - **Flow 2 — Customer → Photographer** (`/v1/client-payments`): end-clients pay the photographer for galleries
 - Wallet (photographer earnings from Flow 2) + withdrawals
 - Album expiry + Cloudinary storage cleanup via cron workers
@@ -184,7 +184,7 @@ trial_status TEXT NOT NULL DEFAULT 'unused'
   CHECK (trial_status IN ('unused','active','consumed'))    -- 'consumed' is TERMINAL
 trial_client_id UUID                  -- one client per user; FK ON DELETE SET NULL
 trial_started_at TIMESTAMPTZ          -- stamped on bind
-trial_expires_at TIMESTAMPTZ          -- bind time + 30 days
+trial_expires_at TIMESTAMPTZ          -- bind time + 15 days
 trial_image_limit INTEGER DEFAULT 3000
 
 -- users (legacy quota — kept but no longer enforced)

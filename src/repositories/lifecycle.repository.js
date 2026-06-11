@@ -6,7 +6,7 @@
  *   • first_album_unshared     → has album, has client without shared_at,
  *                                oldest album older than 12h
  *   • quota_80_pct             → free_used > 240 AND active_plan = 'free'
- *   • inactive_30d             → last_login_at older than 30 days
+ *   • inactive_30d             → last_login_at older than 15 days
  *   • album_expired_archive    → has album marked expired in last 7 days
  *   • payment_failed           → latest tx within 24h has status='failed'
  *

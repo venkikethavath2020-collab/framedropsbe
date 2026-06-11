@@ -2,7 +2,7 @@
 -- Migration 07 — per-client free trial
 --
 -- Replaces the per-photographer 300-image lifetime free quota with a
--- per-first-client free trial: 3000 compressed images, 30 days, consumed
+-- per-first-client free trial: 3000 compressed images, 15 days, consumed
 -- on the FIRST successful upload to any client the photographer owns.
 --
 -- After the trial is consumed (by 3000 images, by 30-day expiry, OR by

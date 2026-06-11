@@ -45,7 +45,7 @@ function validIsoDate(v) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// Default policy: 30 days. Set ALBUM_EXPIRY_DAYS=0 to opt out entirely
+// Default policy: 15 days. Set ALBUM_EXPIRY_DAYS=0 to opt out entirely
 // (albums never expire — only useful for dev/QA environments). Photographers
 // can pay to extend by ALBUM_EXTENSION_DAYS (see extension.service.js).
 const ALBUM_EXPIRY_DAYS = (() => {
