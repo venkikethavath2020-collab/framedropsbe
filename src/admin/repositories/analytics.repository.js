@@ -756,7 +756,15 @@ export async function listUnifiedTransactions({
         JOIN users u ON u.id = cp.photographer_id
 
       UNION ALL
-      -- Wallet ledger entries
+      -- Wallet ledger entries.
+      --
+      -- A Flow-2 customer payment produces TWO rows in this unified feed: the
+      -- payment itself (client_payments arm above) AND the photographer's wallet
+      -- credit booked from it (this arm). They share the same amount/fee/net and
+      -- the same razorpay_payment_id by design — the money is counted once per
+      -- ledger, not doubled. To stop the wallet credit from looking like a second
+      -- payment, namespace its source as 'wallet_*' instead of echoing the raw
+      -- wt.source (which stores 'client_payment' for customer-payment credits).
       SELECT
         wt.id::text,
         wt.photographer_id::text,
@@ -765,7 +773,9 @@ export async function listUnifiedTransactions({
         wt.total_amount,
         wt.platform_fee,
         wt.net_amount,
-        wt.source,
+        CASE WHEN wt.source = 'client_payment'
+             THEN 'wallet_credit'::text
+             ELSE 'wallet_' || wt.source END AS source,
         wt.reference_id,
         NULL::text,
         wt.reference_id,
