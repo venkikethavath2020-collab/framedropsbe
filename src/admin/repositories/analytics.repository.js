@@ -119,14 +119,24 @@ export async function getSparklineSeries() {
 export async function getTopClients(limit = 7) {
   const { rows } = await query(
     `SELECT c.id, c.name,
-            COALESCE(SUM(CASE WHEN cp.status = 'success' THEN cp.amount ELSE 0 END), 0)::bigint AS revenue,
-            COALESCE(SUM(a.image_count), 0)::int AS usage,
-            COUNT(DISTINCT a.id)::int AS albums
+            COALESCE(p.revenue, 0)::bigint AS revenue,
+            COALESCE(al.usage, 0)::int     AS usage,
+            COALESCE(al.albums, 0)::int    AS albums
        FROM clients c
-       LEFT JOIN client_payments cp ON cp.client_id = c.id
-       LEFT JOIN albums a ON a.client_id = c.id
-      GROUP BY c.id
-      ORDER BY revenue DESC
+       LEFT JOIN (
+         SELECT client_id, SUM(amount)::bigint AS revenue
+           FROM client_payments
+          WHERE status = 'success'
+          GROUP BY client_id
+       ) p ON p.client_id = c.id
+       LEFT JOIN (
+         SELECT client_id,
+                SUM(image_count)::int   AS usage,
+                COUNT(DISTINCT id)::int AS albums
+           FROM albums
+          GROUP BY client_id
+       ) al ON al.client_id = c.id
+      ORDER BY revenue DESC, usage DESC
       LIMIT $1`,
     [limit],
   )
