@@ -443,6 +443,123 @@ function bucketTier(uploads) {
   return 'Enterprise'
 }
 
+/**
+ * Finance-module metric cards. Aggregates every money stream into four card
+ * groups so admins read totals instead of summing table rows:
+ *
+ *   1. Platform earnings — Flow 1 unlocks + Flow 2 platform fees (what we keep)
+ *   2. Gross money in     — Flow 1 + Flow 2 gross (total volume through the system)
+ *   3. Paid out / payable — completed withdrawals + pending payout queue + wallet liability
+ *   4. Net position       — platform earnings − cash paid out, plus failed-payment count
+ *
+ * All values are paise (FE renders /100). Honors ?from&to like getDashboardKpis,
+ * and computes changePercent vs the immediately-preceding equal-length window.
+ * wallet_liability is a live balance (current debt owed), so it is shown as-is
+ * and excluded from period deltas — it is not a flow within the window.
+ */
+export async function getFinanceSummary(params = {}) {
+  const { from, to } = defaultRange(params.from, params.to)
+  return withCache(
+    cacheKey('finance-summary', { from: from.toISOString(), to: to.toISOString() }),
+    async () => {
+      const periodMs = to.getTime() - from.getTime()
+      const prevFrom = new Date(from.getTime() - periodMs)
+      const prevTo = from
+
+      const [cur, prev] = await Promise.all([
+        repo.getFinanceSummary(from, to),
+        repo.getFinanceSummary(prevFrom, prevTo),
+      ])
+
+      const platformEarnings = cur.flow1 + cur.flow2_fee
+      const prevEarnings = prev.flow1 + prev.flow2_fee
+      const grossIn = cur.flow1 + cur.flow2_gross
+      const prevGrossIn = prev.flow1 + prev.flow2_gross
+      const netPosition = platformEarnings - cur.withdrawn
+      const prevNet = prevEarnings - prev.withdrawn
+
+      const trend = (delta) => (delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat')
+      const pct = (curr, p) => (p > 0 ? +(((curr - p) / p) * 100).toFixed(1) : 0)
+      const inr = (paise) => `₹${(paise / 100).toLocaleString('en-IN')}`
+
+      return [
+        {
+          label: 'Platform Earnings',
+          value: platformEarnings,
+          previousValue: prevEarnings,
+          changePercent: pct(platformEarnings, prevEarnings),
+          trend: trend(platformEarnings - prevEarnings),
+          icon: 'mdi-cash-multiple',
+          color: 'success',
+          format: 'currency',
+          subtitle: `${inr(cur.flow1)} unlocks · ${inr(cur.flow2_fee)} fees`,
+          hint: 'The money the business actually keeps. It adds two things: what photographers paid us to unlock their albums, plus our commission (the small fee) on every payment a customer made to a photographer. This is the closest number to "profit before costs".',
+        },
+        {
+          label: 'Gross Money In',
+          value: grossIn,
+          previousValue: prevGrossIn,
+          changePercent: pct(grossIn, prevGrossIn),
+          trend: trend(grossIn - prevGrossIn),
+          icon: 'mdi-arrow-down-bold-circle',
+          color: 'info',
+          format: 'currency',
+          subtitle: `${inr(cur.flow1)} platform · ${inr(cur.flow2_gross)} customer`,
+          hint: 'The total amount of money that passed through the platform — everything photographers paid us plus everything customers paid photographers. This is bigger than our earnings because most of it (the photographer\'s share) is only passing through; we forward it on. Think "total transaction volume", not profit.',
+        },
+        {
+          label: 'Paid Out',
+          value: cur.withdrawn,
+          previousValue: prev.withdrawn,
+          changePercent: pct(cur.withdrawn, prev.withdrawn),
+          trend: trend(cur.withdrawn - prev.withdrawn),
+          icon: 'mdi-arrow-up-bold-circle',
+          color: 'warning',
+          format: 'currency',
+          subtitle: `${inr(cur.payout_pending)} pending in queue`,
+          hint: 'Real cash that has already left the company\'s bank account and reached photographers, as completed withdrawals in this date range. The smaller line below shows payouts still waiting in the queue (requested but not yet sent).',
+        },
+        {
+          label: 'Payable to Photographers',
+          value: cur.wallet_liability,
+          changePercent: 0,
+          trend: 'flat',
+          icon: 'mdi-wallet',
+          color: 'secondary',
+          format: 'currency',
+          subtitle: 'Current wallet balance owed (live)',
+          hint: 'Money photographers have earned and are holding in their wallets, but haven\'t withdrawn yet. It is a debt the company owes them and will have to pay out later. This is a live running total, so it ignores the date filter — you always owe the current balance.',
+        },
+        {
+          label: 'Net Position',
+          value: netPosition,
+          previousValue: prevNet,
+          changePercent: pct(netPosition, prevNet),
+          trend: trend(netPosition - prevNet),
+          icon: 'mdi-scale-balance',
+          color: netPosition >= 0 ? 'success' : 'error',
+          format: 'currency',
+          subtitle: 'Earnings − cash paid out',
+          hint: 'A simple "where do we stand" number: Platform Earnings minus the cash already Paid Out to photographers. Positive (green) means more came in than went out in this period; negative (red) means payouts outran earnings. It does not subtract wallet balances still owed.',
+        },
+        {
+          label: 'Failed Payments',
+          value: cur.failed_count,
+          previousValue: prev.failed_count,
+          changePercent: pct(cur.failed_count, prev.failed_count),
+          trend: trend(cur.failed_count - prev.failed_count),
+          icon: 'mdi-alert-circle',
+          color: cur.failed_count > 0 ? 'error' : 'success',
+          format: 'number',
+          subtitle: 'Flow 1 + Flow 2, in range',
+          hint: 'How many payment attempts failed in this date range — both photographer payments to us and customer payments to photographers. A rising count can mean card/bank issues or a checkout problem worth investigating. Lower is better.',
+        },
+      ]
+    },
+    { ttlMs: 60_000 },
+  )
+}
+
 export async function getRevenueMetrics(params = {}) {
   // When no date range is supplied, return all-time revenue. Otherwise
   // honour the caller's window. We deliberately diverge from defaultRange()
