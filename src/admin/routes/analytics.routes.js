@@ -32,6 +32,18 @@ const router = Router()
  *       200: { description: Top clients., content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccess' } } } }
  *       403: { $ref: '#/components/responses/Forbidden' }
  *
+ * /v1/admin/analytics/finance-summary:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Finance-module metric cards (earnings / gross in / paid out / net position)
+ *     security: [{ BearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: from, schema: { type: string, format: date } }
+ *       - { in: query, name: to,   schema: { type: string, format: date } }
+ *     responses:
+ *       200: { description: Finance summary cards., content: { application/json: { schema: { $ref: '#/components/schemas/ApiSuccess' } } } }
+ *       403: { $ref: '#/components/responses/Forbidden' }
+ *
  * /v1/admin/analytics/revenue-timeseries:
  *   get:
  *     tags: [Admin]
@@ -179,6 +191,7 @@ const router = Router()
  */
 router.get('/dashboard-kpis',     asyncHandler(ctrl.getDashboardKpis))
 router.get('/top-clients',        asyncHandler(ctrl.getTopClients))
+router.get('/finance-summary',    asyncHandler(ctrl.getFinanceSummary))
 
 router.get('/revenue-timeseries', asyncHandler(ctrl.getRevenueTimeSeries))
 router.get('/user-growth',        asyncHandler(ctrl.getUserGrowth))

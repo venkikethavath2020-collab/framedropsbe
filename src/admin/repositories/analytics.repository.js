@@ -114,6 +114,59 @@ export async function getSparklineSeries() {
   }
 }
 
+// ─── A2. Finance summary ────────────────────────────────────────────────────
+//
+// One round-trip behind the Finance module's metric cards. Every figure is in
+// PAISE (FE renders /100). Each money stream is aggregated from its OWN ledger
+// in an independent subquery — no joins across ledgers, so nothing fans out.
+//
+// Streams (all filtered to status='success' where a status exists):
+//   - flow1            transactions.amount          photographer → platform unlocks
+//   - flow2_gross      client_payments.amount       customer → photographer (gross)
+//   - flow2_fee        client_payments.platform_fee platform's cut of Flow 2
+//   - flow2_net        client_payments.photographer_net  what photographers earned
+//   - withdrawn        withdrawals.amount  (completed)   cash actually paid out
+//   - payout_pending   withdrawals.amount  (pending/approved/processing) queued, owed
+//   - wallet_liability wallets.balance (live, not range-filtered) currently owed
+//   - failed_count     transactions + client_payments  failed in range (health signal)
+//
+// `from`/`to` bound the dated streams. `wallet_liability` is a live balance, so
+// it ignores the range by design (you always owe the current balance).
+export async function getFinanceSummary(from, to) {
+  const { rows } = await query(
+    `SELECT
+       (SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions
+         WHERE status = 'success' AND created_at BETWEEN $1 AND $2)            AS flow1,
+       (SELECT COALESCE(SUM(amount), 0)::bigint FROM client_payments
+         WHERE status = 'success' AND created_at BETWEEN $1 AND $2)            AS flow2_gross,
+       (SELECT COALESCE(SUM(platform_fee), 0)::bigint FROM client_payments
+         WHERE status = 'success' AND created_at BETWEEN $1 AND $2)            AS flow2_fee,
+       (SELECT COALESCE(SUM(photographer_net), 0)::bigint FROM client_payments
+         WHERE status = 'success' AND created_at BETWEEN $1 AND $2)            AS flow2_net,
+       (SELECT COALESCE(SUM(amount), 0)::bigint FROM withdrawals
+         WHERE status = 'completed' AND created_at BETWEEN $1 AND $2)          AS withdrawn,
+       (SELECT COALESCE(SUM(amount), 0)::bigint FROM withdrawals
+         WHERE status IN ('pending','approved','processing'))                  AS payout_pending,
+       (SELECT COALESCE(SUM(balance), 0)::bigint FROM wallets)                 AS wallet_liability,
+       (SELECT COUNT(*)::int FROM transactions
+         WHERE status = 'failed' AND created_at BETWEEN $1 AND $2)
+       + (SELECT COUNT(*)::int FROM client_payments
+           WHERE status = 'failed' AND created_at BETWEEN $1 AND $2)           AS failed_count`,
+    [from, to],
+  )
+  const r = rows[0] || {}
+  return {
+    flow1:            Number(r.flow1 ?? 0),
+    flow2_gross:      Number(r.flow2_gross ?? 0),
+    flow2_fee:        Number(r.flow2_fee ?? 0),
+    flow2_net:        Number(r.flow2_net ?? 0),
+    withdrawn:        Number(r.withdrawn ?? 0),
+    payout_pending:   Number(r.payout_pending ?? 0),
+    wallet_liability: Number(r.wallet_liability ?? 0),
+    failed_count:     Number(r.failed_count ?? 0),
+  }
+}
+
 // ─── B. Top clients ────────────────────────────────────────────────────────
 
 export async function getTopClients(limit = 7) {

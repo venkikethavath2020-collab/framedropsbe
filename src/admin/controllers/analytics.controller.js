@@ -35,6 +35,11 @@ export async function getTopClients(req, res) {
   return R.success(res, data, 'Top clients')
 }
 
+export async function getFinanceSummary(req, res) {
+  const data = await service.getFinanceSummary(parseDateParams(req))
+  return R.success(res, data, 'Finance summary')
+}
+
 export async function getRevenueTimeSeries(req, res) {
   const data = await service.getRevenueTimeSeries(parseDateParams(req))
   return R.success(res, data, 'Revenue timeseries')
