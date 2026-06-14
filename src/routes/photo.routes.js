@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
-import { listPhotos, listPhotosByShareId, uploadPhoto, deletePhoto, bulkDeletePhotos, getSelectedPhotos, downloadSelectedNames, signPhotoUpload, finalizePhotoUpload, bulkSignPhotoUpload, bulkFinalizePhotoUpload } from '../controllers/photo.controller.js'
+import { listPhotos, listPhotosByShareId, listSelectedPhotosByShareId, uploadPhoto, deletePhoto, bulkDeletePhotos, getSelectedPhotos, downloadSelectedNames, signPhotoUpload, finalizePhotoUpload, bulkSignPhotoUpload, bulkFinalizePhotoUpload } from '../controllers/photo.controller.js'
 import { requireAuth } from '../middleware/auth.js'
 import { asyncHandler } from '../middleware/errorHandler.js'
 const router = Router()
@@ -50,6 +50,25 @@ const bulkDeleteLimiter = rateLimit({
  *       404: { $ref: '#/components/responses/NotFound' }
  */
 router.get( '/albums/share/:shareId/photos',       asyncHandler(listPhotosByShareId))   // public
+
+/**
+ * @openapi
+ * /v1/albums/share/{shareId}/photos/selected:
+ *   get:
+ *     tags: [Photos]
+ *     summary: All photos the client favourited in a shared gallery (public, not paginated)
+ *     description: |
+ *       Returns full photo objects for every photo the client selected, regardless
+ *       of pagination. The Favorites tab uses this so selections from not-yet-scrolled
+ *       batches still render. Same access gate as the gallery listing.
+ *     parameters: [{ $ref: '#/components/parameters/ShareId' }]
+ *     responses:
+ *       200: { description: Selected photos in the gallery., content: { application/json: { schema: { allOf: [ { $ref: '#/components/schemas/ApiSuccess' }, { type: object, properties: { data: { type: array, items: { $ref: '#/components/schemas/Photo' } } } } ] } } } }
+ *       402: { description: Payment required to access these photos. }
+ *       404: { $ref: '#/components/responses/NotFound' }
+ *       410: { description: Gallery link expired. }
+ */
+router.get( '/albums/share/:shareId/photos/selected', asyncHandler(listSelectedPhotosByShareId))   // public
 
 /**
  * @openapi

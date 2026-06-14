@@ -124,6 +124,15 @@ export async function listPhotosByShareId(req, res) {
   return R.success(res, result.data, 'Photos fetched successfully', { meta: result.meta })
 }
 
+export async function listSelectedPhotosByShareId(req, res) {
+  const { shareId } = req.params
+
+  const result = await photoService.listSelectedPhotosByShareId(shareId)
+  if (result.error) return R.error(res, result.error, result.status || 404)
+
+  return R.success(res, result.data, 'Selected photos fetched successfully')
+}
+
 export async function downloadSelectedNames(req, res) {
   const result = await photoService.getSelectedPhotoNames(req.params.albumId, req.user.id)
 

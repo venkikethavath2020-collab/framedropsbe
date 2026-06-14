@@ -834,6 +834,40 @@ export async function listPhotosByShareId(shareId, { page = 1, perPage = 50 }) {
   return listPhotos(album.id, { page, perPage })
 }
 
+/**
+ * All photos the client favourited in a shared gallery, full objects (not just
+ * IDs), independent of pagination.
+ *
+ * The client gallery loads photos 50-at-a-time via infinite scroll, but the
+ * Favorites tab must show EVERY selected photo regardless of which batches have
+ * scrolled into view. The selection endpoint returns only IDs (no thumb URLs),
+ * so the FE can't render un-loaded favourites — hence this endpoint.
+ *
+ * Access model mirrors listPhotosByShareId (gallery-not-found / expired / Flow-2
+ * payment gate). It is NOT billing-gated like the photographer-side
+ * getSelectedPhotos: the client is viewing their own selections inside a gallery
+ * they already have access to, not downloading originals.
+ */
+export async function listSelectedPhotosByShareId(shareId) {
+  const album = await albumRepo.findByShareId(shareId)
+  if (!album) return { error: 'Gallery not found', status: 404 }
+  if (isAlbumExpired(album)) return { error: 'This gallery link has expired', status: 410 }
+
+  const parentClient = await clientRepo.findByIdPublic(album.client_id)
+  if (parentClient?.is_payment_required) {
+    if (!album.delivery_id) {
+      return { error: 'Payment required to access these photos', status: 402 }
+    }
+    const paid = await clientPaymentRepo.findSuccessfulByDeliveryId(album.delivery_id)
+    if (!paid) {
+      return { error: 'Payment required to access these photos', status: 402 }
+    }
+  }
+
+  const rows = await photoRepo.findSelectedByAlbumId(album.id)
+  return { data: rows.map(formatPhoto) }
+}
+
 export async function getSelectedPhotoNames(albumId, userId) {
   const album = await albumRepo.findById(albumId, userId)
   if (!album) return { error: 'Album not found', status: 404 }
