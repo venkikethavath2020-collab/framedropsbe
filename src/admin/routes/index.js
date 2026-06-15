@@ -24,6 +24,7 @@ import featureInterestsRoutes from './featureInterests.routes.js'
 import notificationsRoutes from './notifications.routes.js'
 import searchRoutes from './search.routes.js'
 import announcementsRoutes from './announcements.routes.js'
+import campaignsRoutes from './campaigns.routes.js'
 import systemRoutes from './system.routes.js'
 import jobsRoutes from './jobs.routes.js'
 
@@ -47,6 +48,7 @@ router.use('/feature-interests',  featureInterestsRoutes)
 router.use('/notifications',      notificationsRoutes)
 router.use('/search',             searchRoutes)
 router.use('/announcements',      announcementsRoutes)
+router.use('/campaigns',          campaignsRoutes)
 router.use('/system',             systemRoutes)
 router.use('/jobs',               jobsRoutes)
 

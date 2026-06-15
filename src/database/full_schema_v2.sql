@@ -1487,6 +1487,49 @@ CREATE TABLE agreement_events (
 CREATE INDEX idx_agreement_events_agreement ON agreement_events(agreement_id, created_at);
 
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- campaigns + campaign_exclusions  (migration 15)
+--   Admin-defined event (e.g. International Photography Day) with a scoring
+--   window. Photographers are ranked LIVE on a single composite score; no
+--   snapshot table, no cron. campaign_exclusions is the disqualification list
+--   (re-include = DELETE the row); every exclude/include also writes
+--   admin_audit_log. `weights` (nullable) overrides CAMPAIGN_WEIGHTS in
+--   src/config/campaign.js per-campaign.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE campaigns (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name         VARCHAR(160) NOT NULL,
+  slug         VARCHAR(80)  NOT NULL UNIQUE,
+  description  TEXT,
+  start_date   TIMESTAMPTZ NOT NULL,
+  end_date     TIMESTAMPTZ NOT NULL,
+  weights      JSONB,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  created_by   UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT campaigns_window_order CHECK (end_date > start_date)
+);
+
+CREATE INDEX idx_campaigns_active ON campaigns(is_active) WHERE is_active = true;
+CREATE INDEX idx_campaigns_slug   ON campaigns(slug);
+
+CREATE TRIGGER trg_campaigns_updated_at
+  BEFORE UPDATE ON campaigns FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE campaign_exclusions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  campaign_id  UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL REFERENCES users(id)     ON DELETE CASCADE,
+  reason       TEXT,
+  excluded_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_campaign_exclusion UNIQUE (campaign_id, user_id)
+);
+
+CREATE INDEX idx_campaign_exclusions_campaign ON campaign_exclusions(campaign_id);
+
+
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- SUMMARY
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1501,14 +1544,15 @@ CREATE INDEX idx_agreement_events_agreement ON agreement_events(agreement_id, cr
 --   worker_heartbeats,
 --   lifecycle_email_log, webhook_events,
 --   events, notes, email_jobs, email_logs, feedbacks,
---   feature_interests, announcements, system_settings
+--   feature_interests, announcements, system_settings,
+--   agreements, agreement_events, campaigns, campaign_exclusions
 -- Functions (8):
 --   update_updated_at_column, lock_completed_album,
 --   admin_audit_log_block_mutation,
 --   increment_album_image_count, decrement_album_image_count,
 --   decrement_album_image_count_by,
 --   increment_album_selected_count, decrement_album_selected_count
--- Triggers: updated_at triggers (incl. announcements + system_settings)
+-- Triggers: updated_at triggers (incl. announcements + system_settings + campaigns)
 --   + auto-lock on albums + audit-log append-only guards
 -- Indexes: 80+ (regular + partial + unique)
 -- Seed rows: 2 in system_settings (maintenance.enabled, maintenance.message)
@@ -1525,6 +1569,10 @@ CREATE INDEX idx_agreement_events_agreement ON agreement_events(agreement_id, cr
 --   09_heal_trial_reset_loophole.sql    — (heal-only; no DDL — safe to skip on fresh DB)
 --   10_heal_trial_after_cascade_delete.sql — (heal-only; no DDL — safe to skip on fresh DB)
 --   11_heal_trial_orphan_active.sql        — (heal-only; no DDL — safe to skip on fresh DB)
+--   12_strip_cdn_image_transform_from_thumbs.sql — (data backfill; no DDL)
+--   13_signup_abuse_signals.sql         — users signup-abuse signal columns
+--   14_agreements.sql                   — agreements + agreement_events tables
+--   15_campaigns.sql                    — campaigns + campaign_exclusions tables
 --
 -- A fresh DB built from full_schema_v2.sql does NOT need to re-apply any
 -- of the above. The heal migrations (08/09/10/11) only target rows in
