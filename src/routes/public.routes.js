@@ -13,6 +13,7 @@ import { Router } from 'express'
 import { asyncHandler } from '../middleware/errorHandler.js'
 import { getPublicStats } from '../controllers/publicStats.controller.js'
 import { listPublicTestimonials } from '../controllers/feedback.controller.js'
+import { getPublicCampaign } from '../controllers/campaign.controller.js'
 
 const router = Router()
 
@@ -51,8 +52,20 @@ const router = Router()
  *         schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
  *     responses:
  *       200: { description: "Testimonials list." }
+ *
+ * /v1/public/campaigns/{slug}:
+ *   get:
+ *     tags: [Feedback]
+ *     summary: "Public campaign landing copy (no standings)"
+ *     description: "Name/description/window for an active campaign, keyed by slug. The leaderboard is admin-only and never exposed here."
+ *     parameters:
+ *       - { in: path, name: slug, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: "Campaign copy." }
+ *       404: { description: "No active campaign with that slug." }
  */
-router.get('/stats',        asyncHandler(getPublicStats))
-router.get('/testimonials', asyncHandler(listPublicTestimonials))
+router.get('/stats',         asyncHandler(getPublicStats))
+router.get('/testimonials',  asyncHandler(listPublicTestimonials))
+router.get('/campaigns/:slug', asyncHandler(getPublicCampaign))
 
 export default router
