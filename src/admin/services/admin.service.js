@@ -399,6 +399,7 @@ function formatAlbum(r) {
     clientName: r.client_name, clientEmail: r.client_email,
     photographerName: r.photographer_name, photographerEmail: r.photographer_email,
     actualPhotoCount: r.actual_photo_count,
+    expiresAt: r.expires_at, isExpired: r.is_expired,
     createdAt: r.created_at, updatedAt: r.updated_at,
   }
 }

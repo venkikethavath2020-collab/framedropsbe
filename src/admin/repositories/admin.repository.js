@@ -471,6 +471,7 @@ export async function listAlbums({ page = 1, perPage = 20, status, search }) {
        a.image_count, a.selected_count,
        a.is_paid, a.is_locked,
        a.client_name, a.client_email,
+       a.expires_at, a.is_expired,
        a.created_at, a.updated_at,
        u.name AS photographer_name, u.email AS photographer_email
      FROM albums a
