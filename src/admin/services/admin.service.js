@@ -3,6 +3,8 @@
  */
 
 import * as adminRepo from '../repositories/admin.repository.js'
+import * as platformDueRepo from '../../repositories/platformDue.repository.js'
+import { calculateAlbumPrice, CLIENT_MAX_IMAGES } from '../../config/pricing.js'
 import { transaction as dbTransaction } from '../../config/db.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -26,10 +28,20 @@ const ROLE_RANK = { photographer: 1, client: 1, admin: 2, super_admin: 3 }
 export async function getDashboardStats() {
   // 2 connections instead of 5: aggregates fold into one scalar bundle,
   // signups stays separate (GROUP BY).
-  const [agg, recentSignups] = await Promise.all([
+  const [agg, recentSignups, dueGroups] = await Promise.all([
     adminRepo.getDashboardAggregates(),
     adminRepo.getRecentSignups(30),
+    platformDueRepo.getOutstandingImageGroupsAllUsers(),
   ])
+
+  // Price each (user, client) group's CONSOLIDATED image bracket — pricing is
+  // per-client, so we must NOT sum the per-album frozen amounts (that would
+  // overstate the platform-wide total for multi-album clients).
+  let outstandingPlatformDues = 0
+  for (const g of dueGroups) {
+    const billable = Math.min(g.images || 0, CLIENT_MAX_IMAGES)
+    if (billable > 0) outstandingPlatformDues += calculateAlbumPrice(billable) * 100
+  }
 
   return {
     data: {
@@ -50,6 +62,9 @@ export async function getDashboardStats() {
         clientPayments:          Number(agg.total_client_payments),
         platformFees:            Number(agg.total_platform_fees),
         photographerEarnings:    Number(agg.total_photographer_earnings),
+        // Flow-1 unlock fees owed but not yet settled (platform_dues),
+        // priced per-client bracket (see above).
+        outstandingPlatformDues,
       },
       agreements: {
         total: Number(agg.total_agreements),

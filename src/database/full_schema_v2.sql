@@ -790,6 +790,51 @@ CREATE TRIGGER trg_album_extensions_updated_at
 
 
 -- ═══════════════════════════════════════════════════════════════════════════════
+-- 13b. PLATFORM DUES — Flow-1 unlock fee persisted as a debt at album completion.
+-- Created when an album is COMPLETED while unpaid (is_paid=false, price>0). The
+-- debt lives here so album expiry (R2 purge) never touches financial state.
+-- amount/user_id are the debt; album_id/client_id are display back-pointers
+-- (SET NULL so the due survives album/client deletion). One due per album, ever
+-- (full unique index) — completion happens once per sealed album. See migration
+-- 16_platform_dues.sql.
+-- ═══════════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE platform_dues (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             UUID NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
+  album_id            UUID REFERENCES albums(id)  ON DELETE SET NULL,
+  client_id           UUID REFERENCES clients(id) ON DELETE SET NULL,
+  amount              INTEGER NOT NULL CHECK (amount > 0),     -- frozen Flow-1 fee, in PAISE
+  currency            VARCHAR(3) NOT NULL DEFAULT 'INR',
+  status              VARCHAR(20) NOT NULL DEFAULT 'unpaid'
+                      CHECK (status IN ('unpaid', 'paid', 'waived')),
+  reason              VARCHAR(40) NOT NULL DEFAULT 'album_completed_unpaid',
+  paid_at             TIMESTAMPTZ,
+  paid_via            VARCHAR(40),
+  paid_reference_id   UUID,                                   -- transactions.id that cleared it
+  waived_at           TIMESTAMPTZ,
+  waived_by           UUID REFERENCES users(id) ON DELETE SET NULL,
+  waived_reason       TEXT,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_platform_dues_user_unpaid
+  ON platform_dues(user_id) WHERE status = 'unpaid';
+CREATE INDEX idx_platform_dues_status     ON platform_dues(status);
+CREATE INDEX idx_platform_dues_created_at ON platform_dues(created_at);
+CREATE INDEX idx_platform_dues_album      ON platform_dues(album_id) WHERE album_id IS NOT NULL;
+
+-- Idempotency: at most ONE due per album across ALL statuses. Creation upserts
+-- via ON CONFLICT on this index.
+CREATE UNIQUE INDEX uq_platform_dues_one_per_album
+  ON platform_dues(user_id, album_id) WHERE album_id IS NOT NULL;
+
+CREATE TRIGGER trg_platform_dues_updated_at
+  BEFORE UPDATE ON platform_dues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+-- ═══════════════════════════════════════════════════════════════════════════════
 -- 14. COUPON REDEMPTIONS — one row per (coupon, user, transaction).
 -- UNIQUE constraint is the idempotency backstop on retried verify.
 -- ═══════════════════════════════════════════════════════════════════════════════

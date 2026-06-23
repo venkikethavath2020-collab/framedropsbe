@@ -13,6 +13,7 @@ import albumsRoutes from './albums.routes.js'
 import agreementsRoutes from './agreements.routes.js'
 import walletsRoutes from './wallets.routes.js'
 import withdrawalsRoutes from './withdrawals.routes.js'
+import platformDuesRoutes from './platformDues.routes.js'
 import analyticsRoutes from './analytics.routes.js'
 import auditRoutes from './audit.routes.js'
 import couponsRoutes from './coupons.routes.js'
@@ -37,6 +38,7 @@ router.use('/albums',      albumsRoutes)
 router.use('/agreements',  agreementsRoutes)
 router.use('/wallets',     walletsRoutes)
 router.use('/withdrawals', withdrawalsRoutes)
+router.use('/platform-dues', platformDuesRoutes)
 router.use('/analytics',   analyticsRoutes)
 router.use('/audit-log',   auditRoutes)
 router.use('/coupons',     couponsRoutes)

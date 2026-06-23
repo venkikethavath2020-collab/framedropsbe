@@ -11,7 +11,14 @@ export async function findAllByUserId(userId) {
     `SELECT c.*,
             COUNT(a.id)::int AS album_count,
             COALESCE(SUM(a.image_count), 0)::int AS total_image_count,
-            COALESCE(SUM(a.selected_count), 0)::int AS total_selected_count
+            COALESCE(SUM(a.selected_count), 0)::int AS total_selected_count,
+            -- Locked = completed albums the photographer hasn't paid the
+            -- platform to unlock (is_paid = false). Drives the client-card
+            -- "payment needed" banner. No expiry filter — an expired unpaid
+            -- album still owes its fee (platform_dues model).
+            COALESCE(SUM(
+              CASE WHEN a.status = 'completed' AND a.is_paid = false THEN 1 ELSE 0 END
+            ), 0)::int AS locked_album_count
      FROM clients c
      LEFT JOIN albums a ON a.client_id = c.id AND a.is_deleted = false
      WHERE c.user_id = $1

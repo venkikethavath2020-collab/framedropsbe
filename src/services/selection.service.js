@@ -16,6 +16,8 @@ import * as selectionRepo from '../repositories/selection.repository.js'
 import * as albumRepo from '../repositories/album.repository.js'
 import * as clientRepo from '../repositories/client.repository.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
+import * as platformDueRepo from '../repositories/platformDue.repository.js'
+import * as walletRepo from '../wallet/wallet.repository.js'
 import * as notifService from './notification.service.js'
 import { transaction as dbTransaction } from '../config/db.js'
 
@@ -185,7 +187,14 @@ export async function submitSelection(shareId) {
         const err = new Error('Gallery not found'); err.status = 404; throw err
       }
 
-      await client.query('SELECT id FROM albums WHERE id = $1 FOR UPDATE', [sel.album_id])
+      // Lock the album row and read its authoritative billing state under the
+      // lock. `album` from loadAndGateAlbum was read before the txn, so re-read
+      // is_paid/price/user_id/client_id here to decide due creation.
+      const { rows: lockedRows } = await client.query(
+        `SELECT user_id, client_id, is_paid, price FROM albums WHERE id = $1 FOR UPDATE`,
+        [sel.album_id]
+      )
+      const lockedAlbum = lockedRows[0]
 
       const count = await selectionRepo.countSelectedPhotos(sel.album_id, client)
       if (count === 0) {
@@ -205,6 +214,32 @@ export async function submitSelection(shareId) {
       // NOTE: Pricing is NOT calculated here. It was already determined at
       // upload time based on imageCount. Selection (selectedCount) does not
       // affect pricing — it is purely for the customer's photo choice UX.
+
+      // ── Platform due (Flow-1 unlock fee) ──────────────────────────────────
+      // Completion is the single financial event: if the album is unpaid and
+      // carries a chargeable price, persist the fee as a debt now so album
+      // expiry (R2 purge only) can never write it off. Trial-covered, empty,
+      // and already-paid albums all have is_paid=true OR price=0 and are
+      // excluded. Idempotent via the (user_id, album_id) unique index; the
+      // wasDraft guard avoids re-running on a benign resubmit.
+      if (wasDraft && lockedAlbum && !lockedAlbum.is_paid && lockedAlbum.price > 0) {
+        // Lock the photographer's wallet row so this due-creation contends on
+        // the same row a concurrent withdrawal locks — makes the withdrawal
+        // block a hard invariant, not an advisory read (plan §5.4). getOrCreate
+        // guarantees the row exists (matching the withdrawal side) so the lock
+        // actually serialises.
+        await walletRepo.getOrCreate(lockedAlbum.user_id, client)
+        await client.query(
+          'SELECT id FROM wallets WHERE photographer_id = $1 FOR UPDATE',
+          [lockedAlbum.user_id]
+        )
+        await platformDueRepo.createDueOnCompletion({
+          userId:   lockedAlbum.user_id,
+          albumId:  sel.album_id,
+          clientId: lockedAlbum.client_id,
+          amount:   lockedAlbum.price * 100, // albums.price is RUPEES; due is PAISE
+        }, client)
+      }
 
       return { wasDraft, count, submittedAt, albumId: sel.album_id }
     })

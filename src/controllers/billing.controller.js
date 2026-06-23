@@ -30,6 +30,12 @@ export async function getLockedAlbums(req, res) {
   return R.success(res, result.data, 'Locked albums fetched')
 }
 
+export async function getPlatformDues(req, res) {
+  const result = await billingService.getPlatformDuesSummary(req.user.id)
+  if (result.error) return R.error(res, result.error, result.status || 400)
+  return R.success(res, result.data, 'Platform dues fetched')
+}
+
 export async function getDashboardStats(req, res) {
   const result = await billingService.getDashboardStats(req.user.id)
   return R.success(res, result.data, 'Dashboard stats fetched')

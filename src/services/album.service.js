@@ -20,7 +20,11 @@ import * as notificationService from './notification.service.js'
 
 const APP_BASE_URL = process.env.APP_BASE_URL || (process.env.ALLOWED_ORIGINS?.split(',')[0]?.trim()) || 'http://localhost:5173'
 
-const ALLOWED_STATUSES = new Set(['pending', 'in_review', 'completed'])
+// Statuses a photographer may set via PUT /albums/:id. 'completed' is
+// deliberately excluded: it is reachable ONLY through the customer selection
+// submit (selection.service.submitSelection), which is the single chokepoint
+// that creates the platform due. Allowing PUT→completed would bypass the due.
+const PUT_ALLOWED_STATUSES = new Set(['pending', 'in_review'])
 const NAME_MAX  = 200
 const EMAIL_MAX = 320
 const PHONE_MAX = 20
@@ -463,8 +467,10 @@ export async function updateAlbum(id, userId, body = {}) {
     updates.event_type = body.eventType
   }
   if (body.status !== undefined) {
-    if (!ALLOWED_STATUSES.has(body.status)) {
-      return { error: `Invalid status. Allowed: ${[...ALLOWED_STATUSES].join(', ')}`, status: 400 }
+    if (!PUT_ALLOWED_STATUSES.has(body.status)) {
+      // 'completed' is intentionally rejected here — it can only be reached via
+      // customer selection submit, which is the sole platform-due creation hook.
+      return { error: `Invalid status. Allowed: ${[...PUT_ALLOWED_STATUSES].join(', ')}`, status: 400 }
     }
     updates.status = body.status
   }

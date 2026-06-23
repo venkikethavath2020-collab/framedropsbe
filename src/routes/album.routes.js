@@ -96,7 +96,7 @@ router.post('/',   requireAuth, asyncHandler(createAlbum))
  *             type: object
  *             properties:
  *               name:      { type: string }
- *               status:    { type: string, enum: [pending, in_review, completed] }
+ *               status:    { type: string, enum: [pending, in_review], description: 'completed is set only via customer selection submit, not here' }
  *               eventType: { type: string }
  *               eventDate: { type: string, format: date }
  *     responses:

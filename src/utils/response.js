@@ -16,8 +16,12 @@ export function created(res, data, message = 'Created') {
   return success(res, data, message, { status: 201 })
 }
 
-export function error(res, message = 'Something went wrong', status = 500) {
-  return res.status(status).json({ success: false, data: null, message })
+export function error(res, message = 'Something went wrong', status = 500, { code } = {}) {
+  const body = { success: false, data: null, message }
+  // Optional machine-readable code for the FE to branch on (e.g.
+  // 'PLATFORM_DUES_OUTSTANDING'). Additive — omitted when not provided.
+  if (code) body.code = code
+  return res.status(status).json(body)
 }
 
 export function notFound(res, message = 'Not found') {

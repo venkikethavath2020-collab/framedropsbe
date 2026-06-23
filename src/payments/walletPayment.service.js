@@ -16,6 +16,7 @@
 import { transaction as dbTransaction } from '../config/db.js'
 import * as walletRepo from '../wallet/wallet.repository.js'
 import * as billingRepo from '../repositories/billing.repository.js'
+import * as platformDueRepo from '../repositories/platformDue.repository.js'
 import * as paymentRepo from './payment.repository.js'
 import * as razorpay from './razorpay.service.js'
 import { calculateAlbumPrice } from '../config/pricing.js'
@@ -97,6 +98,10 @@ export async function payFullWithWallet({ userId, clientId, currency = 'INR' }) 
 
       // Mark client + albums paid, flip free trial flag.
       await billingRepo.markClientPaid(clientId, tx.id, userId, client)
+      // Clear platform dues for the albums this wallet payment covered. The
+      // Razorpay path does this in payment.service.applySideEffects; the
+      // wallet-only path must mirror it or dues persist after a wallet payment.
+      await platformDueRepo.markDuesPaidForAlbums(userId, validIds, tx.id, client)
       await billingRepo.markFreeTrialUsed(userId, client)
 
       return {

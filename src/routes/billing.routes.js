@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getBillingStatus, getPricing, getLockedAlbums, getDashboardStats, getAlbumTracking, getTrialStatus } from '../controllers/billing.controller.js'
+import { getBillingStatus, getPricing, getLockedAlbums, getPlatformDues, getDashboardStats, getAlbumTracking, getTrialStatus } from '../controllers/billing.controller.js'
 import { requireAuth } from '../middleware/auth.js'
 import { asyncHandler } from '../middleware/errorHandler.js'
 
@@ -135,9 +135,58 @@ const router = Router()
  *                         daysRemaining:   { type: number, nullable: true }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
+/**
+ * @openapi
+ * /v1/billing/platform-dues:
+ *   get:
+ *     tags: [Billing]
+ *     summary: Outstanding platform dues for the photographer
+ *     description: |
+ *       Flow-1 unlock fees the photographer owes the platform, persisted as
+ *       dues when an album completed while unpaid. Drives the due badge,
+ *       dashboard banner and settle modal, and explains why withdrawals are
+ *       blocked. Each due carries context (album, client, completion time,
+ *       expired/purged state) so it can explain itself.
+ *     security: [{ BearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Platform dues summary.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/ApiSuccess'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         totalOutstanding: { type: integer, description: 'paise', example: 4900 }
+ *                         count:            { type: integer, example: 1 }
+ *                         currency:         { type: string, example: INR }
+ *                         dues:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               dueId:            { type: string, format: uuid }
+ *                               amount:           { type: integer, description: 'paise' }
+ *                               status:           { type: string, enum: [unpaid] }
+ *                               albumId:          { type: string, format: uuid, nullable: true }
+ *                               albumName:        { type: string, nullable: true }
+ *                               clientId:         { type: string, format: uuid, nullable: true }
+ *                               clientName:       { type: string, nullable: true }
+ *                               albumCompletedAt: { type: string, format: date-time }
+ *                               albumState:       { type: string, enum: [active, expired] }
+ *                               photosPurgedAt:   { type: string, format: date-time, nullable: true }
+ *                               customerPaidStatus: { type: string, enum: [paid, unpaid, unknown] }
+ *                               reason:           { type: string, example: album_completed_unpaid }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
 router.get('/status',          requireAuth, asyncHandler(getBillingStatus))
 router.get('/pricing',         asyncHandler(getPricing))
 router.get('/locked-albums',   requireAuth, asyncHandler(getLockedAlbums))
+router.get('/platform-dues',   requireAuth, asyncHandler(getPlatformDues))
 router.get('/dashboard-stats', requireAuth, asyncHandler(getDashboardStats))
 router.get('/album-tracking',  requireAuth, asyncHandler(getAlbumTracking))
 router.get('/trial-status',    requireAuth, asyncHandler(getTrialStatus))
