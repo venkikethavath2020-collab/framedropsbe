@@ -25,7 +25,9 @@ export async function create(req, res) {
     })
     return R.created(res, data, 'Withdrawal request submitted')
   } catch (err) {
-    if (err?.status) return R.error(res, err.message, err.status)
+    // Forward err.code (e.g. PLATFORM_DUES_OUTSTANDING) so the FE can route to
+    // the settle flow instead of showing a generic error.
+    if (err?.status) return R.error(res, err.message, err.status, { code: err.code })
     throw err
   }
 }

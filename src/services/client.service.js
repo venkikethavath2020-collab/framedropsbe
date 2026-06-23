@@ -98,6 +98,7 @@ function formatClient(row) {
     name:              row.name,
     userId:            row.user_id,
     albumCount:        row.album_count ?? 0,
+    lockedAlbumCount:  row.locked_album_count ?? 0,
     totalImageCount:   totalImages,
     totalSelectedCount: row.total_selected_count ?? 0,
     maxImages,

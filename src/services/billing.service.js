@@ -12,6 +12,7 @@
 import * as billingRepo from '../repositories/billing.repository.js'
 import * as trialRepo from '../repositories/trial.repository.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
+import * as platformDueRepo from '../repositories/platformDue.repository.js'
 import { transaction as dbTransaction } from '../config/db.js'
 import {
   FREE_LIFETIME_IMAGE_LIMIT,
@@ -195,6 +196,112 @@ export async function getLockedAlbumsSummary(userId, clientId = null) {
       priceTier,
       currency: CURRENCY,
       ...(pool || {}),
+    },
+  }
+}
+
+/**
+ * Photographer-facing platform-dues summary (plan §6A). The single source of
+ * truth the FE uses for the due badge / settle modal / wallet block.
+ *
+ * IMPORTANT — pricing is PER-CLIENT, not per-album. Billing brackets price the
+ * SUM of a client's images (e.g. 2 + 5 = 7 images → one ₹49 bracket), exactly
+ * like `getLockedAlbumsSummary` and the payment flow. A platform_dues ROW is
+ * just a MARKER that a given album is owed (so we know which albums + their
+ * context); the billed amount is computed live here by grouping dues by client
+ * and pricing each client's consolidated image bracket. The row's frozen
+ * `amount` is NOT summed — that would double-charge clients with >1 album.
+ *
+ * `albumState` + `photosPurgedAt` drive the "archived but still owed" copy. The
+ * due's own created_at IS the completion moment (created in the completion txn).
+ */
+/**
+ * Outstanding platform dues TOTAL in paise, priced per-client bracket (NOT the
+ * sum of per-album frozen amounts). Used by the withdrawal block and getEarnings
+ * so the gate matches what the settle modal charges. Accepts an optional txn
+ * client so the withdrawal path reads under its wallet FOR UPDATE lock.
+ */
+export async function getOutstandingDuesTotal(userId, client) {
+  const groups = await platformDueRepo.getOutstandingImagesByClient(userId, client)
+  let total = 0
+  for (const g of groups) {
+    const billable = Math.min(g.images || 0, CLIENT_MAX_IMAGES)
+    if (billable > 0) total += calculateAlbumPrice(billable) * 100 // paise
+  }
+  return total
+}
+
+export async function getPlatformDuesSummary(userId) {
+  const rows = await platformDueRepo.getUnpaidDuesForUser(userId)
+
+  // Per-album due markers (used by the AlbumCard badge + the settle modal list).
+  const dues = rows.map(r => ({
+    dueId: r.id,
+    currency: r.currency,
+    status: r.status,
+    albumId: r.album_id,
+    albumName: r.album_name || null,        // null if album hard-deleted
+    clientId: r.client_id,
+    clientName: r.client_name || null,
+    imageCount: r.image_count || 0,
+    albumCompletedAt: r.created_at,         // due creation = completion moment
+    albumState: r.is_expired ? 'expired' : 'active',
+    photosPurgedAt: r.storage_cleaned_at || null,
+    customerPaidStatus: r.client_is_paid === true ? 'paid'
+                       : r.client_is_paid === false ? 'unpaid'
+                       : 'unknown',
+    reason: r.reason,
+  }))
+
+  // Group by client and price each client's CONSOLIDATED image bracket. Use
+  // chargeable_images when set (post free-quota), else image_count — same
+  // fallback as getLockedAlbumsSummary / createOrder so the modal and the
+  // gateway agree.
+  const byClient = new Map()
+  for (const r of rows) {
+    const key = r.client_id || `__noclient__${r.id}`
+    const chargeable = (r.chargeable_images > 0 ? r.chargeable_images : r.image_count) || 0
+    const entry = byClient.get(key) || {
+      clientId: r.client_id || null,
+      clientName: r.client_name || null,
+      images: 0,
+      albumCount: 0,
+      dueIds: [],
+    }
+    entry.images += chargeable
+    entry.albumCount += 1
+    entry.dueIds.push(r.id)
+    byClient.set(key, entry)
+  }
+
+  const clients = []
+  let totalOutstanding = 0
+  for (const entry of byClient.values()) {
+    // Clamp at the configured cap so an over-cap pool doesn't throw; the
+    // photographer is billed at the top tier (createOrder enforces the hard
+    // cap at pay time).
+    const billableImages = Math.min(entry.images, CLIENT_MAX_IMAGES)
+    const priceRupees = billableImages > 0 ? calculateAlbumPrice(billableImages) : 0
+    const amount = priceRupees * 100 // paise
+    totalOutstanding += amount
+    clients.push({
+      clientId: entry.clientId,
+      clientName: entry.clientName,
+      images: entry.images,
+      albumCount: entry.albumCount,
+      amount,                               // paise — per-client consolidated bracket
+      currency: CURRENCY,
+    })
+  }
+
+  return {
+    data: {
+      totalOutstanding,                     // paise — sum of per-client brackets
+      count: dues.length,                   // album-level due count
+      clientCount: clients.length,
+      currency: CURRENCY,
+      clients,                              // per-client billed totals
+      dues,                                 // per-album markers (badge + context)
     },
   }
 }

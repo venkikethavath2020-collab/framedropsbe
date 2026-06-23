@@ -113,13 +113,21 @@ export async function getLockedAlbums(userId, clientId = null, client) {
      WHERE a.user_id = $1
        AND a.status = 'completed'
        AND a.is_paid = false
-       AND (a.expires_at IS NULL OR a.expires_at > NOW())
      ${clientFilter}
      ORDER BY a.created_at DESC, a.id DESC`,
     params
   )
   return rows
 }
+//
+// NOTE (platform_dues / D7): the old `(expires_at IS NULL OR expires_at > NOW())`
+// filter was REMOVED. It was the original revenue leak — an unpaid album that
+// expired silently dropped out of "what you owe" and its Flow-1 fee was written
+// off. The obligation now persists as a platform_dues row created at completion;
+// keeping expired-but-unpaid albums in this set lets the photographer settle and
+// clears the matching due. albums.is_paid remains the sole download-access truth
+// source — surfacing an expired album for PAYMENT does not grant download access
+// (the R2 bytes are already purged).
 
 /**
  * Paid completed albums for a photographer + client. Used alongside
@@ -161,10 +169,13 @@ export async function getClientImagePool(userId, clientId) {
     `SELECT
        COALESCE(SUM(image_count), 0)::int                                          AS total_uploaded,
        COALESCE(SUM(CASE WHEN is_paid = true THEN image_count ELSE 0 END), 0)::int AS paid_images,
+       -- NOTE: no expires_at filter (platform_dues / D7). An unpaid completed
+       -- album that has expired STILL owes its Flow-1 fee, so it must remain in
+       -- unpaid_images — otherwise the payment gate would treat an expired-only
+       -- client as settled and the photographer could never pay the due.
        COALESCE(SUM(
          CASE
            WHEN status = 'completed' AND is_paid = false
-            AND (expires_at IS NULL OR expires_at > NOW())
            THEN image_count
            ELSE 0
          END

@@ -15,6 +15,7 @@ import * as billingRepo from '../repositories/billing.repository.js'
 import * as trialService from '../services/trial.service.js'
 import * as couponService from '../services/coupon.service.js'
 import * as couponRepo from '../repositories/coupon.repository.js'
+import * as platformDueRepo from '../repositories/platformDue.repository.js'
 import { calculateAlbumPrice } from '../config/pricing.js'
 import { transaction as dbTransaction } from '../config/db.js'
 import * as walletRepo from '../wallet/wallet.repository.js'
@@ -136,6 +137,16 @@ async function applySideEffects(tx, client) {
   } else if (albumIds.length > 0) {
     await billingRepo.unlockAlbums(albumIds, tx.id, tx.user_id, client)
   }
+
+  // Clear any platform dues for the albums THIS transaction actually paid for.
+  // Keyed strictly to tx.album_ids — NOT to every album markClientPaid may have
+  // flipped — so a payment for album X never silently clears album Y's due
+  // (plan §5.3 / RISK 4). album_ids is the order's priced set, captured at
+  // createOrder time. Idempotent: only 'unpaid' dues are touched.
+  if (albumIds.length > 0) {
+    await platformDueRepo.markDuesPaidForAlbums(tx.user_id, albumIds, tx.id, client)
+  }
+
   await billingRepo.markFreeTrialUsed(tx.user_id, client)
   // Paying for ANY client retires the per-client free trial: the
   // photographer is now a paying customer and the trial has no further

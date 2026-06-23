@@ -13,6 +13,7 @@
 import { transaction as dbTransaction, query } from '../config/db.js'
 import * as repo from './withdrawal.repository.js'
 import * as walletRepo from '../wallet/wallet.repository.js'
+import * as billingService from '../services/billing.service.js'
 import * as userRepo from '../repositories/user.repository.js'
 import * as emailService from '../email/email.service.js'
 import * as payoutMethodService from '../payoutMethods/payoutMethod.service.js'
@@ -103,6 +104,12 @@ export async function getEarnings(userId) {
   const withdrawable = wallet.balance ?? 0
   const total = pending + withdrawable
 
+  // Outstanding platform dues block withdrawals (plan §6A). Surface here so the
+  // FE can disable the withdraw button pre-emptively and explain why, rather
+  // than only discovering the 402 at submit time.
+  const totalDue = await billingService.getOutstandingDuesTotal(userId)
+  const hasDues = totalDue > 0
+
   return {
     totalBalance: total,
     totalBalanceFormatted: format(total),
@@ -114,7 +121,12 @@ export async function getEarnings(userId) {
     minWithdrawalFormatted: format(MIN_WITHDRAWAL_PAISE),
     maxWithdrawal: MAX_WITHDRAWAL_PAISE,
     maxWithdrawalFormatted: MAX_WITHDRAWAL_PAISE ? format(MAX_WITHDRAWAL_PAISE) : null,
-    canWithdraw: withdrawable >= MIN_WITHDRAWAL_PAISE,
+    totalDue,
+    totalDueFormatted: format(totalDue),
+    blockedReason: hasDues
+      ? `Settle outstanding platform dues (${format(totalDue)}) to enable withdrawals.`
+      : null,
+    canWithdraw: withdrawable >= MIN_WITHDRAWAL_PAISE && !hasDues,
   }
 }
 
@@ -215,6 +227,20 @@ export async function requestWithdrawal(userId, {
       'SELECT id FROM wallets WHERE photographer_id = $1 FOR UPDATE',
       [userId]
     )
+
+    // Block withdrawal while the photographer owes the platform (plan §5.4).
+    // Read under the SAME wallet FOR UPDATE lock the due-creation path takes at
+    // album completion, so this is a hard invariant: a due cannot be committed
+    // between this check and the funds lock. Block (not net-off, per D3) — the
+    // photographer settles via the Flow-1 payment path, which clears the due.
+    const outstandingDues = await billingService.getOutstandingDuesTotal(userId, client)
+    if (outstandingDues > 0) {
+      throw httpError(
+        402,
+        `You have outstanding platform dues of ${format(outstandingDues)}. Please settle them before withdrawing.`,
+        'PLATFORM_DUES_OUTSTANDING'
+      )
+    }
 
     // Prevent double submission: only one active request at a time
     if (await repo.hasActiveRequest(userId, client)) {
@@ -516,8 +542,9 @@ export async function cancelByUser(userId, id) {
 
 // ─── utils ──────────────────────────────────────────────────────────────────
 
-function httpError(status, message) {
+function httpError(status, message, code) {
   const err = new Error(message)
   err.status = status
+  if (code) err.code = code
   return err
 }

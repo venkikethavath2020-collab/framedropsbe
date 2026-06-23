@@ -58,6 +58,10 @@ export async function getDashboardAggregates() {
       (SELECT COALESCE(SUM(amount), 0)::bigint           FROM client_payments WHERE status = 'success') AS total_client_payments,
       (SELECT COALESCE(SUM(platform_fee), 0)::bigint     FROM client_payments WHERE status = 'success') AS total_platform_fees,
       (SELECT COALESCE(SUM(photographer_net), 0)::bigint FROM client_payments WHERE status = 'success') AS total_photographer_earnings,
+      -- NOTE: outstanding platform dues are NOT aggregated here. Pricing is
+      -- per-client (bracket on summed images), so summing the per-album frozen
+      -- amount would overstate it. admin.service computes it via
+      -- getOutstandingImageGroupsAllUsers + per-group bracket pricing.
       -- wallets
       (SELECT COALESCE(SUM(balance), 0)::bigint FROM wallets) AS total_wallet_balance
   `)
