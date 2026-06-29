@@ -74,9 +74,13 @@ export async function getKpiUserCounts() {
 }
 
 export async function getKpiStorageBytes() {
+  // CURRENT R2 footprint only: photos whose bytes still live in R2 (storage_key
+  // is nulled at expiry cleanup). Without this filter the KPI would keep
+  // counting purged photos and never drop after expiry.
   const { rows } = await query(
     `SELECT COALESCE(SUM(COALESCE(file_size_compressed, file_size_original, size, 0)), 0)::bigint AS bytes
-       FROM photos`,
+       FROM photos
+      WHERE storage_key IS NOT NULL`,
   )
   return Number(rows[0]?.bytes ?? 0)
 }

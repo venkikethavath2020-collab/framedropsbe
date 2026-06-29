@@ -53,7 +53,9 @@ export async function getDashboardStats() {
       },
       content: {
         totalAlbums: agg.total_albums,
-        totalImages: agg.total_images,
+        totalImages: agg.total_images,                          // lifetime (incl. purged)
+        currentPhotoCount: Number(agg.current_photo_count),     // live in R2
+        currentStorageBytes: Number(agg.current_storage_bytes), // live in R2 (bytes)
       },
       revenue: {
         platformPayments:        Number(agg.total_platform_revenue),
