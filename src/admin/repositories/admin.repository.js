@@ -45,7 +45,15 @@ export async function getDashboardAggregates() {
       (SELECT COUNT(*) FROM users WHERE is_disabled = false)::int                           AS total_users,
       (SELECT COUNT(*) FROM users WHERE is_disabled = true)::int                            AS total_disabled,
       (SELECT COUNT(*) FROM albums)::int                                                    AS total_albums,
+      -- LIFETIME images ever uploaded (includes expired/purged). albums.image_count
+      -- is never decremented at expiry, so this is an all-time activity figure.
       (SELECT COALESCE(SUM(image_count), 0) FROM albums)::int                               AS total_images,
+      -- CURRENT photos still living in R2 (storage_key set; nulled at expiry
+      -- cleanup). Drops as albums expire — reflects live storage footprint.
+      (SELECT COUNT(*) FROM photos WHERE storage_key IS NOT NULL)::int                      AS current_photo_count,
+      -- CURRENT storage bytes for those in-R2 photos (compressed thumbnail size).
+      (SELECT COALESCE(SUM(COALESCE(file_size_compressed, file_size_original, size, 0)), 0)::bigint
+         FROM photos WHERE storage_key IS NOT NULL)                                         AS current_storage_bytes,
       -- platform revenue (Flow 1: photographer → platform) — includes album
       -- payments AND agreement credit-pack purchases (both live in transactions)
       (SELECT COALESCE(SUM(amount), 0)::bigint FROM transactions WHERE status = 'success')  AS total_platform_revenue,
