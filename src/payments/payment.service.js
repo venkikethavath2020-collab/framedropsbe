@@ -16,12 +16,12 @@ import * as trialService from '../services/trial.service.js'
 import * as couponService from '../services/coupon.service.js'
 import * as couponRepo from '../repositories/coupon.repository.js'
 import * as platformDueRepo from '../repositories/platformDue.repository.js'
-import { calculateAlbumPrice } from '../config/pricing.js'
 import { transaction as dbTransaction } from '../config/db.js'
 import * as walletRepo from '../wallet/wallet.repository.js'
 import * as userRepo from '../repositories/user.repository.js'
 import * as emailService from '../email/email.service.js'
 import * as notificationService from '../services/notification.service.js'
+import * as galleryPricing from '../services/gallery-pricing.service.js'
 
 /**
  * Best-effort: fan out an admin notification for a captured Flow-1 payment.
@@ -242,14 +242,12 @@ export async function createOrder({ userId, clientId, currency = 'INR', notes = 
       }
 
       const validIds = lockedAlbums.map(a => a.id)
-      const totalImages = lockedAlbums.reduce((sum, a) => sum + a.image_count, 0)
-      // Use chargeable images (after free quota deduction) for pricing.
-      // Falls back to image_count for albums that predate the free-quota system.
-      const totalChargeableImages = lockedAlbums.reduce(
-        (sum, a) => sum + (a.chargeable_images > 0 ? a.chargeable_images : a.image_count), 0
-      )
-      const priceInRupees = calculateAlbumPrice(totalChargeableImages)
-      const grossAmount = priceInRupees * 100
+      const pricingSnapshot = await billingRepo.getClientGalleryPricingSnapshot(userId, clientId, client)
+      const albumIdsForTransaction = pricingSnapshot.unpaidAlbumIds.length ? pricingSnapshot.unpaidAlbumIds : validIds
+      const pricing = galleryPricing.calculateGalleryPricing(pricingSnapshot.totalUploadedImages)
+      const totalImages = pricing.totalUploadedImages
+      const priceInRupees = pricing.priceRupees
+      const grossAmount = pricing.pricePaise
       if (grossAmount < 100) {
         const err = new Error('Calculated amount is too low'); err.status = 400; throw err
       }
@@ -282,9 +280,9 @@ export async function createOrder({ userId, clientId, currency = 'INR', notes = 
         try {
           zeroTx = await paymentRepo.createTransaction({
             userId,
-            albumIds: validIds,
+            albumIds: albumIdsForTransaction,
             totalImages,
-            totalAlbums: validIds.length,
+            totalAlbums: albumIdsForTransaction.length,
             amount: netAmount,            // 0 (or near-zero, but we treat as fully covered)
             currency,
             status: 'success',
@@ -320,9 +318,9 @@ export async function createOrder({ userId, clientId, currency = 'INR', notes = 
       try {
         tx = await paymentRepo.createTransaction({
           userId,
-          albumIds: validIds,
+          albumIds: albumIdsForTransaction,
           totalImages,
-          totalAlbums: validIds.length,
+          totalAlbums: albumIdsForTransaction.length,
           amount: netAmount,
           currency,
           status: 'pending',
@@ -348,7 +346,7 @@ export async function createOrder({ userId, clientId, currency = 'INR', notes = 
         currency,
         receipt: tx.id,
         notes: {
-          userId, clientId, albumCount: validIds.length, totalImages,
+          userId, clientId, albumCount: albumIdsForTransaction.length, totalImages,
           ...(couponCode ? { couponCode } : {}),
           ...safeNotes,
         },

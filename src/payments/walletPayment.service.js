@@ -19,7 +19,7 @@ import * as billingRepo from '../repositories/billing.repository.js'
 import * as platformDueRepo from '../repositories/platformDue.repository.js'
 import * as paymentRepo from './payment.repository.js'
 import * as razorpay from './razorpay.service.js'
-import { calculateAlbumPrice } from '../config/pricing.js'
+import * as galleryPricing from '../services/gallery-pricing.service.js'
 
 /** Full payment via wallet only. No Razorpay involvement. */
 export async function payFullWithWallet({ userId, clientId, currency = 'INR' }) {
@@ -37,15 +37,11 @@ export async function payFullWithWallet({ userId, clientId, currency = 'INR' }) 
         const err = new Error('No unpaid albums found for this client'); err.status = 400; throw err
       }
       const validIds = lockedAlbums.map(a => a.id)
-      const totalImages = lockedAlbums.reduce((sum, a) => sum + a.image_count, 0)
-      // Use chargeable images (after free quota deduction) for pricing —
-      // mirrors payment.service.js. Fallback to image_count for legacy
-      // albums that predate the free-quota system.
-      const totalChargeableImages = lockedAlbums.reduce(
-        (sum, a) => sum + (a.chargeable_images > 0 ? a.chargeable_images : a.image_count), 0
-      )
-      const priceInRupees = calculateAlbumPrice(totalChargeableImages)
-      const amount = priceInRupees * 100
+      const pricingSnapshot = await billingRepo.getClientGalleryPricingSnapshot(userId, clientId, client)
+      const albumIdsForTransaction = pricingSnapshot.unpaidAlbumIds.length ? pricingSnapshot.unpaidAlbumIds : validIds
+      const pricing = galleryPricing.calculateGalleryPricing(pricingSnapshot.totalUploadedImages)
+      const totalImages = pricing.totalUploadedImages
+      const amount = pricing.pricePaise
       if (amount < 100) {
         const err = new Error('Calculated amount is too low'); err.status = 400; throw err
       }
@@ -58,9 +54,9 @@ export async function payFullWithWallet({ userId, clientId, currency = 'INR' }) 
       try {
         tx = await paymentRepo.createTransaction({
           userId,
-          albumIds: validIds,
+          albumIds: albumIdsForTransaction,
           totalImages,
-          totalAlbums: validIds.length,
+          totalAlbums: albumIdsForTransaction.length,
           amount,
           currency,
           status: 'success',
@@ -101,16 +97,16 @@ export async function payFullWithWallet({ userId, clientId, currency = 'INR' }) 
       // Clear platform dues for the albums this wallet payment covered. The
       // Razorpay path does this in payment.service.applySideEffects; the
       // wallet-only path must mirror it or dues persist after a wallet payment.
-      await platformDueRepo.markDuesPaidForAlbums(userId, validIds, tx.id, client)
+      await platformDueRepo.markDuesPaidForAlbums(userId, albumIdsForTransaction, tx.id, client)
       await billingRepo.markFreeTrialUsed(userId, client)
 
       return {
         data: {
           paymentId: tx.id,
           status: 'success',
-          albumIds: validIds,
+          albumIds: albumIdsForTransaction,
           totalImages,
-          totalAlbums: validIds.length,
+          totalAlbums: albumIdsForTransaction.length,
           paymentMethod: 'wallet',
           walletAmountUsed: amount,
         },
@@ -146,15 +142,11 @@ export async function applyWalletForCombo({ userId, clientId, walletAmount, curr
         const err = new Error('No unpaid albums found for this client'); err.status = 400; throw err
       }
       const validIds = lockedAlbums.map(a => a.id)
-      const totalImages = lockedAlbums.reduce((sum, a) => sum + a.image_count, 0)
-      // Use chargeable images (after free quota deduction) for pricing —
-      // mirrors payment.service.js. Fallback to image_count for legacy
-      // albums that predate the free-quota system.
-      const totalChargeableImages = lockedAlbums.reduce(
-        (sum, a) => sum + (a.chargeable_images > 0 ? a.chargeable_images : a.image_count), 0
-      )
-      const priceInRupees = calculateAlbumPrice(totalChargeableImages)
-      const totalAmount = priceInRupees * 100
+      const pricingSnapshot = await billingRepo.getClientGalleryPricingSnapshot(userId, clientId, client)
+      const albumIdsForTransaction = pricingSnapshot.unpaidAlbumIds.length ? pricingSnapshot.unpaidAlbumIds : validIds
+      const pricing = galleryPricing.calculateGalleryPricing(pricingSnapshot.totalUploadedImages)
+      const totalImages = pricing.totalUploadedImages
+      const totalAmount = pricing.pricePaise
       if (totalAmount < 100) {
         const err = new Error('Calculated amount is too low'); err.status = 400; throw err
       }
@@ -171,9 +163,9 @@ export async function applyWalletForCombo({ userId, clientId, walletAmount, curr
       try {
         tx = await paymentRepo.createTransaction({
           userId,
-          albumIds: validIds,
+          albumIds: albumIdsForTransaction,
           totalImages,
-          totalAlbums: validIds.length,
+          totalAlbums: albumIdsForTransaction.length,
           amount: totalAmount,
           currency,
           status: 'pending',
@@ -215,7 +207,7 @@ export async function applyWalletForCombo({ userId, clientId, walletAmount, curr
         currency,
         receipt: tx.id,
         notes: {
-          userId, clientId, albumCount: validIds.length, totalImages,
+          userId, clientId, albumCount: albumIdsForTransaction.length, totalImages,
           wallet_amount: String(walletAmount),
           payment_method: 'combo',
         },

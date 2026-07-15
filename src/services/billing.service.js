@@ -13,6 +13,7 @@ import * as billingRepo from '../repositories/billing.repository.js'
 import * as trialRepo from '../repositories/trial.repository.js'
 import * as clientPaymentRepo from '../clientPayments/clientPayment.repository.js'
 import * as platformDueRepo from '../repositories/platformDue.repository.js'
+import * as galleryPricing from './gallery-pricing.service.js'
 import { transaction as dbTransaction } from '../config/db.js'
 import {
   FREE_LIFETIME_IMAGE_LIMIT,
@@ -118,54 +119,24 @@ export async function getLockedAlbumsSummary(userId, clientId = null) {
   }))
 
   const totalImages = albums.reduce((sum, a) => sum + a.imageCount, 0)
-  // Fall back to imageCount for albums where chargeable_images wasn't set
-  // (legacy albums pre-recalc, or albums healed by migration 08_*). Mirrors
-  // the same fallback in payment.service.createOrder so the modal price and
-  // the gateway price stay aligned.
-  const totalChargeableImages = albums.reduce(
-    (sum, a) => sum + (a.chargeableImages > 0 ? a.chargeableImages : a.imageCount),
-    0,
-  )
   const totalAlbums = albums.length
 
-  // Sum the stored per-album prices. Each album's price was calculated
-  // at submission time based on its own chargeable images (after free
-  // quota deduction). This replaces the old approach of pricing the
-  // cumulative total across all albums.
-  let price = 0
-  if (totalChargeableImages > 0) {
-    // Use calculateAlbumPrice on the total chargeable images across all
-    // locked albums for this client — this gives one consolidated tier
-    // price for the batch payment, consistent with the payment flow.
-    if (totalChargeableImages > CLIENT_MAX_IMAGES) {
-      return {
-        error: `This batch has ${totalChargeableImages} chargeable images, exceeding the configured maximum of ${CLIENT_MAX_IMAGES}. Contact support for enterprise pricing.`,
-        status: 400,
-      }
-    }
-    price = calculateAlbumPrice(totalChargeableImages)
-  }
-
-  const tiers = getPricingTiers()
-  const priceTier = totalChargeableImages > 0
-    ? tiers.find(t => totalChargeableImages >= t.min && totalChargeableImages <= t.max) || null
-    : null
-
-  // When scoped to a single client, include the per-client image pools so
-  // the frontend's client-level gate can decide on `unpaidImages` directly.
-  // Without these, the gate falls back to `totalChargeableImages` which is
-  // close enough but doesn't show the photographer their previously-paid
-  // photos in the modal.
+  // When scoped to a single client, include the per-client image pools for
+  // gate context. Price itself comes from totalUploadedImages and ignores
+  // selected, completed, pending, paid, and remaining-image values.
   let pool = null
   let paidAlbums = []
+  let pricing = galleryPricing.calculateGalleryPricing(totalImages)
   if (clientId) {
-    const [p, paidRows] = await Promise.all([
+    const [p, paidRows, pricingSnapshot] = await Promise.all([
       billingRepo.getClientImagePool(userId, clientId),
       billingRepo.getPaidAlbumsForClient(userId, clientId),
+      billingRepo.getClientGalleryPricingSnapshot(userId, clientId),
     ])
+    pricing = galleryPricing.calculateGalleryPricing(pricingSnapshot.totalUploadedImages)
     pool = {
       clientId,
-      totalUploadedImages: p.total_uploaded,
+      totalUploadedImages: pricing.totalUploadedImages,
       paidImages: p.paid_images,
       unpaidImages: p.unpaid_images,
     }
@@ -190,10 +161,10 @@ export async function getLockedAlbumsSummary(userId, clientId = null) {
       albums,
       paidAlbums,
       totalImages,
-      totalChargeableImages,
+      totalChargeableImages: pricing.totalUploadedImages,
       totalAlbums,
-      price,
-      priceTier,
+      price: pricing.priceRupees,
+      priceTier: pricing.priceTier,
       currency: CURRENCY,
       ...(pool || {}),
     },
@@ -225,8 +196,7 @@ export async function getOutstandingDuesTotal(userId, client) {
   const groups = await platformDueRepo.getOutstandingImagesByClient(userId, client)
   let total = 0
   for (const g of groups) {
-    const billable = Math.min(g.images || 0, CLIENT_MAX_IMAGES)
-    if (billable > 0) total += calculateAlbumPrice(billable) * 100 // paise
+    total += galleryPricing.calculateGalleryPricing(g.images || 0).pricePaise
   }
   return total
 }
@@ -253,14 +223,12 @@ export async function getPlatformDuesSummary(userId) {
     reason: r.reason,
   }))
 
-  // Group by client and price each client's CONSOLIDATED image bracket. Use
-  // chargeable_images when set (post free-quota), else image_count — same
-  // fallback as getLockedAlbumsSummary / createOrder so the modal and the
-  // gateway agree.
+  // Group by client and price each client's full uploaded gallery image total.
+  // Ignore selected_count, album status, paid/remaining pools, and per-album
+  // chargeable_images snapshots.
   const byClient = new Map()
   for (const r of rows) {
     const key = r.client_id || `__noclient__${r.id}`
-    const chargeable = (r.chargeable_images > 0 ? r.chargeable_images : r.image_count) || 0
     const entry = byClient.get(key) || {
       clientId: r.client_id || null,
       clientName: r.client_name || null,
@@ -268,7 +236,7 @@ export async function getPlatformDuesSummary(userId) {
       albumCount: 0,
       dueIds: [],
     }
-    entry.images += chargeable
+    entry.images = Math.max(entry.images, Number(r.client_total_uploaded_images || r.image_count || 0))
     entry.albumCount += 1
     entry.dueIds.push(r.id)
     byClient.set(key, entry)
@@ -277,12 +245,7 @@ export async function getPlatformDuesSummary(userId) {
   const clients = []
   let totalOutstanding = 0
   for (const entry of byClient.values()) {
-    // Clamp at the configured cap so an over-cap pool doesn't throw; the
-    // photographer is billed at the top tier (createOrder enforces the hard
-    // cap at pay time).
-    const billableImages = Math.min(entry.images, CLIENT_MAX_IMAGES)
-    const priceRupees = billableImages > 0 ? calculateAlbumPrice(billableImages) : 0
-    const amount = priceRupees * 100 // paise
+    const amount = galleryPricing.calculateGalleryPricing(entry.images).pricePaise
     totalOutstanding += amount
     clients.push({
       clientId: entry.clientId,
