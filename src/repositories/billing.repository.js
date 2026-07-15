@@ -188,6 +188,32 @@ export async function getClientImagePool(userId, clientId) {
 }
 
 /**
+ * Immutable pricing basis for a client's gallery: total uploaded image_count
+ * across every non-deleted album for the client, regardless of album status,
+ * selected_count, remaining unpaid images, or payment state.
+ */
+export async function getClientGalleryPricingSnapshot(userId, clientId, client) {
+  const executor = client || { query: (t, p) => query(t, p) }
+  const { rows } = await executor.query(
+    `SELECT
+       COALESCE(SUM(a.image_count), 0)::int AS total_uploaded_images,
+       COALESCE(array_agg(a.id ORDER BY a.created_at, a.id) FILTER (WHERE a.is_paid = false), '{}') AS unpaid_album_ids,
+       COUNT(*)::int AS total_albums
+     FROM albums a
+     WHERE a.user_id = $1
+       AND a.client_id = $2
+       AND a.is_deleted = false`,
+    [userId, clientId]
+  )
+  const row = rows[0] || {}
+  return {
+    totalUploadedImages: Number(row.total_uploaded_images || 0),
+    unpaidAlbumIds: row.unpaid_album_ids || [],
+    totalAlbums: Number(row.total_albums || 0),
+  }
+}
+
+/**
  * Mark all currently-unpaid albums under a client as paid.
  *
  * Important: `clients.is_paid` is NOT set to true permanently. Doing so used

@@ -40,21 +40,25 @@ export async function createDueOnCompletion({ userId, albumId, clientId, amount 
  */
 export async function getOutstandingImagesByClient(userId, client) {
   const executor = client || { query: (t, p) => query(t, p) }
-  // Group unpaid dues by client and sum the albums' chargeable images so the
-  // caller can price each client's CONSOLIDATED bracket (2 + 5 = 7 → ₹49), the
-  // same way the payment flow does. Summing the per-album frozen `amount` would
-  // double-charge multi-album clients. A NULL client_id (album/client deleted)
-  // is grouped per-due so the debt still counts.
+  // Group unpaid dues by client and price from the client's full uploaded
+  // gallery image total. A NULL client_id (album/client deleted) falls back to
+  // the due album's stored image count so the orphaned debt still counts.
   const { rows } = await executor.query(
     `SELECT COALESCE(d.client_id::text, 'due:' || d.id::text) AS group_key,
-            COALESCE(SUM(
-              CASE WHEN COALESCE(a.chargeable_images, 0) > 0
-                   THEN a.chargeable_images ELSE COALESCE(a.image_count, 0) END
-            ), 0)::int AS images
+            CASE
+              WHEN d.client_id IS NOT NULL THEN (
+                SELECT COALESCE(SUM(a2.image_count), 0)::int
+                  FROM albums a2
+                 WHERE a2.user_id = d.user_id
+                   AND a2.client_id = d.client_id
+                   AND a2.is_deleted = false
+              )
+              ELSE COALESCE(a.image_count, 0)::int
+            END AS images
        FROM platform_dues d
        LEFT JOIN albums a ON a.id = d.album_id
       WHERE d.user_id = $1 AND d.status = 'unpaid'
-      GROUP BY group_key`,
+      GROUP BY group_key, d.user_id, d.client_id, d.id, a.image_count`,
     [userId]
   )
   return rows // [{ group_key, images }]
@@ -75,6 +79,16 @@ export async function getUnpaidDuesForUser(userId, client) {
             a.status      AS album_status,
             a.image_count,
             COALESCE(a.chargeable_images, 0)::int AS chargeable_images,
+            CASE
+              WHEN d.client_id IS NOT NULL THEN (
+                SELECT COALESCE(SUM(a2.image_count), 0)::int
+                  FROM albums a2
+                 WHERE a2.user_id = d.user_id
+                   AND a2.client_id = d.client_id
+                   AND a2.is_deleted = false
+              )
+              ELSE COALESCE(a.image_count, 0)::int
+            END AS client_total_uploaded_images,
             a.updated_at  AS album_updated_at,
             a.is_expired,
             a.expired_at,
@@ -147,14 +161,20 @@ export async function getOutstandingImageGroupsAllUsers(client) {
   const { rows } = await executor.query(
     `SELECT d.user_id,
             COALESCE(d.client_id::text, 'due:' || d.id::text) AS group_key,
-            COALESCE(SUM(
-              CASE WHEN COALESCE(a.chargeable_images, 0) > 0
-                   THEN a.chargeable_images ELSE COALESCE(a.image_count, 0) END
-            ), 0)::int AS images
+            CASE
+              WHEN d.client_id IS NOT NULL THEN (
+                SELECT COALESCE(SUM(a2.image_count), 0)::int
+                  FROM albums a2
+                 WHERE a2.user_id = d.user_id
+                   AND a2.client_id = d.client_id
+                   AND a2.is_deleted = false
+              )
+              ELSE COALESCE(a.image_count, 0)::int
+            END AS images
        FROM platform_dues d
        LEFT JOIN albums a ON a.id = d.album_id
       WHERE d.status = 'unpaid'
-      GROUP BY d.user_id, group_key`
+      GROUP BY d.user_id, group_key, d.client_id, d.id, a.image_count`
   )
   return rows // [{ user_id, group_key, images }]
 }
