@@ -90,6 +90,8 @@ export default defineComponent({
   },
   setup(props) {
     const photographerFirst = (props.photographerName || '').split(' ')[0] || 'your photographer'
+    const hasAccessCode = Boolean(props.accessCode && props.accessCode.trim())
+
     return () => h(Html, { lang: 'en' }, () => [
       h(Head),
       h(Preview, null, () =>
@@ -106,21 +108,30 @@ export default defineComponent({
         h(Text, { style: { ...styles.lead, margin: '0 0 8px' } }, () =>
           `Hi ${props.customerName},`),
         h(Text, { style: styles.lead }, () =>
-          `${props.photographerName} just shared your gallery. Browse the set, mark the photos you love, and submit your picks when you're done — they'll handle the rest.`),
+          hasAccessCode
+            ? `${props.photographerName} just shared your gallery. Browse the set, mark the photos you love, and submit your picks when you're done — they'll handle the rest.`
+            : `${props.photographerName} just shared your gallery. The access code will be shared by your photographer. Once you have it, browse the set, mark the photos you love, and submit your picks when you're done — they'll handle the rest.`
+        ),
         props.coverImageUrl
           ? h(Img, { src: props.coverImageUrl, alt: props.albumName, width: 488, style: cover })
           : null,
         h(Section, { style: { textAlign: 'center', margin: '0 0 16px' } }, () =>
           h(Button, { href: props.galleryUrl, style: styles.button }, () => 'View gallery'),
         ),
-        props.accessCode
+        hasAccessCode
           ? h(Section, { style: codeBox }, () => [
               h(Text, { style: codeLabel }, () => 'Access code'),
               h(Text, { style: codeText }, () => props.accessCode),
               h(Text, { style: { ...styles.fineprint, margin: '8px 0 0' } }, () =>
                 'Enter this code on the gallery page to unlock your photos.'),
             ])
-          : null,
+          : h(Section, { style: noticeBox }, () =>
+              h(Text, { style: { fontSize: '13px', color: colors.amberInk, lineHeight: 1.5, margin: 0 } }, () => [
+                '🔑 ',
+                h('strong', null, 'Access code coming from your photographer'),
+                '. They will share it with you separately so you can unlock the gallery.',
+              ]),
+            ),
         h(Section, { style: list }, () => [
           h(Text, { style: listItem }, () => '✨  Browse and favorite the shots you love'),
         ]),
